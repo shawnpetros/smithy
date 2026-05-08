@@ -5,6 +5,7 @@ tracker:
   active_states:
     - Todo
     - In Progress
+    - Adversarial Review
     - Merging
     - Rework
   terminal_states:
@@ -107,6 +108,7 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
 - `Todo` -> queued; immediately transition to `In Progress` before active work.
   - Special case: if a PR is already attached, treat as feedback/rework loop (run full PR feedback sweep, address or explicitly push back, revalidate, return to `Human Review`).
 - `In Progress` -> implementation actively underway.
+- `Adversarial Review` -> Smithy-owned audit slot. The build worker transitions here after the PR is open and validated. An external reviewer agent (e.g. [Anvil](https://github.com/shawnpetros/anvil)) polls this state, runs a cross-model review on the diff, and transitions to `Human Review` on pass or `Rework` on fail. The build worker does NOT act on issues in this state. In Smithy alpha-0, the in-process cross-model reviewer is not yet wired; this state is a passthrough slot that integrates with Anvil today.
 - `Human Review` -> PR is attached and validated; waiting on human approval.
 - `Merging` -> approved by human; execute the `land` skill flow (do not call `gh pr merge` directly).
 - `Rework` -> reviewer requested changes; planning + implementation required.
@@ -231,12 +233,12 @@ Use this only when completion is blocked by missing required tools or missing au
     - Confirm every required ticket-provided validation/test-plan item is explicitly marked complete in the workpad.
     - Repeat this check-address-verify loop until no outstanding comments remain and checks are fully passing.
     - Re-open and refresh the workpad before state transition so `Plan`, `Acceptance Criteria`, and `Validation` exactly match completed work.
-12. Only then move issue to `Human Review`.
-    - Exception: if blocked by missing required non-GitHub tools/auth per the blocked-access escape hatch, move to `Human Review` with the blocker brief and explicit unblock actions.
+12. Only then move issue to `Adversarial Review`. The external reviewer agent transitions to `Human Review` on pass or `Rework` on fail. Do NOT transition the issue directly to `Human Review`.
+    - Exception: if blocked by missing required non-GitHub tools/auth per the blocked-access escape hatch, move to `Human Review` with the blocker brief and explicit unblock actions. (The blocker bypass skips `Adversarial Review` because the work is incomplete.)
 13. For `Todo` tickets that already had a PR attached at kickoff:
     - Ensure all existing PR feedback was reviewed and resolved, including inline review comments (code changes or explicit, justified pushback response).
     - Ensure branch was pushed with any required updates.
-    - Then move to `Human Review`.
+    - Then move to `Adversarial Review`.
 
 ## Step 3: Human Review and merge handling
 
