@@ -54,6 +54,51 @@ defmodule SymphonyElixir.Linear.Client do
   }
   """
 
+  @query_with_labels """
+  query SymphonyLinearPollWithLabels($projectSlug: String!, $stateNames: [String!]!, $labelNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
+    issues(filter: {project: {slugId: {eq: $projectSlug}}, state: {name: {in: $stateNames}}, labels: {some: {name: {in: $labelNames}}}}, first: $first, after: $after) {
+      nodes {
+        id
+        identifier
+        title
+        description
+        priority
+        state {
+          name
+        }
+        branchName
+        url
+        assignee {
+          id
+        }
+        labels {
+          nodes {
+            name
+          }
+        }
+        inverseRelations(first: $relationFirst) {
+          nodes {
+            type
+            issue {
+              id
+              identifier
+              state {
+                name
+              }
+            }
+          }
+        }
+        createdAt
+        updatedAt
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+  """
+
   @query_by_ids """
   query SymphonyLinearIssuesById($ids: [ID!]!, $first: Int!, $relationFirst: Int!) {
     issues(filter: {id: {in: $ids}}, first: $first) {
@@ -241,14 +286,33 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp do_fetch_by_states_page(project_slug, state_names, assignee_filter, after_cursor, acc_issues) do
-    with {:ok, body} <-
-           graphql(@query, %{
+    label_names = configured_label_filter()
+
+    {query, variables} =
+      case label_names do
+        [] ->
+          {@query,
+           %{
              projectSlug: project_slug,
              stateNames: state_names,
              first: @issue_page_size,
              relationFirst: @issue_page_size,
              after: after_cursor
-           }),
+           }}
+
+        names ->
+          {@query_with_labels,
+           %{
+             projectSlug: project_slug,
+             stateNames: state_names,
+             labelNames: names,
+             first: @issue_page_size,
+             relationFirst: @issue_page_size,
+             after: after_cursor
+           }}
+      end
+
+    with {:ok, body} <- graphql(query, variables),
          {:ok, issues, page_info} <- decode_linear_page_response(body, assignee_filter) do
       updated_acc = prepend_page_issues(issues, acc_issues)
 
@@ -262,6 +326,20 @@ defmodule SymphonyElixir.Linear.Client do
         {:error, reason} ->
           {:error, reason}
       end
+    end
+  end
+
+  defp configured_label_filter do
+    case Config.settings!().tracker.labels do
+      labels when is_list(labels) ->
+        labels
+        |> Enum.map(&to_string/1)
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.uniq()
+
+      _ ->
+        []
     end
   end
 
