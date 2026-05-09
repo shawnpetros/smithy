@@ -146,6 +146,8 @@ After the build worker exits with a PR open, the orchestrator transitions the Li
 
 Independent context: the reviewer runs in a fresh model session, with no prompt visibility into the build worker's reasoning. The reviewer sees only the diff, the spec (Linear ticket body and comments), and the repo's `AGENTS.md`.
 
+Persona list, not single persona. The reviewer dispatch is modeled as a list of `{persona_path, model_hint}` entries from the workflow config, not a single persona reference. Alpha-1 ships length-1 (one reviewer per ticket), preserving vanilla cross-model semantics. Length-N panel review (multiple reviewers grading independently, results aggregated by a synthesizer) is the carve-out for §12 speccing-mode and lands in alpha-3+. Modeling the field as a list from day one keeps that path open without alpha-1 paying for it.
+
 ### 5. Label-gated autonomous merge
 
 A ticket carrying the `auto-merge` label, when it passes adversarial review, is merged and closed automatically. No `In Review` human gate. This is opt-in per ticket.
@@ -215,6 +217,30 @@ Section ownership inside the workpad:
 - `### Confusions`: either agent may append.
 
 Append semantics, not overwrite. Each iteration adds a new dated subsection rather than replacing the prior one. The workpad becomes a chronological record of the ticket's full lifecycle, including reviewer pushback and rebuild responses. Operators reviewing a ticket post-merge can read the full back-and-forth in one place.
+
+### 12. Speccing-mode workflow (research preview, alpha-3+)
+
+Code review has objective oracles: compilers, tests, lint, security scanners. The reviewer's findings can be checked against deterministic ground truth. Spec review has none of that. The reviewer is another opinion-holder, and a single opinion against an ambiguous artifact compounds rather than cancels the original ambiguity. The risk modes for spec work are different from code: ambiguity (terms not pinned), assumption (premises not surfaced), and lack of context (constraints not loaded).
+
+Speccing-mode is a separate workflow shape that runs when the ticket carries a `mode:speccing` label (or the workflow file's `tracker.workflow_kind` is `speccing`). It replaces the single-build-then-single-review pipeline with a six-stage planner + panel + synthesizer loop. The shape borrows from the Salazar planner-features-loop pattern.
+
+1. **Question-first generation.** A planner agent reads the ticket body and produces an open-questions list: terms not pinned, assumptions not validated, constraints not loaded. The list lands in the workpad under `### Open Questions`. No spec content is generated yet.
+
+2. **Answer-resolution turn.** Each question gets answered, either by a human (default for high-stakes specs) or by a follow-up agent with web/repo read access (autonomous mode). Answers append under `### Resolved Questions` and become ground truth for the next stage. Unanswered questions block progression.
+
+3. **Spec generation.** A build agent (Codex or Claude per ticket label, same dispatch as code-mode per §1) writes the spec doc, treating the original ticket body as goal and the resolved questions as constraints. Output is one or more markdown files in the target repo at a configured spec-doc path.
+
+4. **Panel review.** N reviewer personas grade the spec independently, each with a different lens: architect-reviewer (acceptance-coverage, tradeoff defense, footgun docs), data-model-reviewer, devex-reviewer, migration-reviewer, security-reviewer, etc. Each writes its own `REVIEW.md` to a per-reviewer subdirectory of the workspace. Persona list is configured in the workflow file and dispatched via the persona-list mechanism in §4. Each persona MAY run on a different model family, multiplying cross-model coverage.
+
+5. **Synthesizer pass.** A synthesizer agent reads all panel `REVIEW.md` files plus the spec doc. Output is a `SYNTHESIS.md` with three sections: consensus findings (multiple reviewers agree, treat as authoritative), divergent findings (reviewers contradict each other, requires human resolution), and unaddressed scenarios (issues no reviewer raised that the synthesizer believes belong on the punch-list). The synthesis appends to the workpad under `### Synthesis`.
+
+6. **Decomposition.** The planner agent re-runs against the resolved spec and produces `features.json`: a structured artifact where each feature has acceptance criteria, scope notes, and a link back to the spec section it originated from. Optional follow-up: each feature gets filed as a separate Linear ticket, linked to the original speccing ticket as `related`. This is the closest thing to "did it compile" for spec work: if the spec can't be decomposed into actionable, scoped features, the spec failed regardless of how the prose reads.
+
+The Linear state machine is unchanged. Speccing-mode tickets pass through the same `Todo → In Progress → Adversarial Review → In Review → Done` flow. Fan-out happens within `In Progress` (planner, build agent) and `Adversarial Review` (panel + synthesizer). The orchestrator remains the sole state-transition authority.
+
+Why alpha-3+ and not earlier: speccing-mode requires both the persona-list dispatch (data model in alpha-1, length-N usage in alpha-3+) and a synthesizer agent (new in alpha-3). It also benefits from dual runtimes (alpha-1) so panel personas can run on different model families.
+
+What's explicitly out of scope: multi-turn debate between reviewers (each runs in a fresh session, same as code-mode), automated resolution of divergent findings (the synthesizer flags them, the human decides), and ambiguity-detection over arbitrary natural language beyond the planner's open-questions step. Speccing-mode reduces ambiguity, assumption, and context-gap risk; it does not eliminate them.
 
 ---
 
