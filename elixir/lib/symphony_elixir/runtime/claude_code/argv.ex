@@ -113,10 +113,14 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.Argv do
   end
 
   @doc "Canonical `claude-*` model id per tier."
-  @spec model_for_tier(tier()) :: String.t()
+  @spec model_for_tier(tier() | String.t()) :: String.t()
   def model_for_tier(:opus), do: "claude-opus-4-7"
   def model_for_tier(:sonnet), do: "claude-sonnet-4-6"
   def model_for_tier(:haiku), do: "claude-haiku-4-5"
+  def model_for_tier("opus"), do: "claude-opus-4-7"
+  def model_for_tier("sonnet"), do: "claude-sonnet-4-6"
+  def model_for_tier("haiku"), do: "claude-haiku-4-5"
+  def model_for_tier(_unknown), do: "claude-sonnet-4-6"
 
   @doc "Default disallowed tool list. Exposed for tests and operator overrides."
   @spec default_disallowed_tools() :: [String.t()]
