@@ -265,15 +265,35 @@ Use this only when completion is blocked by missing required tools or missing au
 
 ## Step 4: Rework handling
 
-1. Treat `Rework` as a full approach reset, not incremental patching.
-2. Re-read the full issue body and all human comments; explicitly identify what will be done differently this attempt.
-3. Close the existing PR tied to the issue.
-4. Remove the existing `## Codex Workpad` comment from the issue.
-5. Create a fresh branch from `origin/main`.
-6. Start over from the normal kickoff flow:
-   - If current issue state is `Todo`, move it to `In Progress`; otherwise keep the current state.
-   - Create a new bootstrap `## Codex Workpad` comment.
-   - Build a fresh plan/checklist and execute end-to-end.
+Rework is incremental by default. Apply targeted fixes to the existing branch and PR. A full reset is only warranted when the reviewer explicitly says so or the operator applies the `smithy:hard-reset` label.
+
+### Default (incremental) flow
+
+1. Read `REVIEW.md` (or the equivalent reviewer feedback) and parse findings by grade:
+   - `blocker` — must address before re-review
+   - `polish` — fix now if cheap, otherwise file a follow-up ticket and reply on the PR with rationale
+   - `future` — file a follow-up ticket only, no code changes this pass
+   - `rebuild-from-scratch` — triggers the hard-reset flow below
+2. For each `blocker` finding: apply the fix on the EXISTING branch with a focused fixup commit.
+3. For each `polish`: decide accept-and-fix vs defer-with-ticket.
+4. Push fixup commits to the EXISTING branch (no force-push, no PR close, no branch recreate).
+5. Update the workpad: note what was addressed and what was deferred, link follow-up tickets.
+6. Transition the ticket back to `Adversarial Review` for re-review.
+
+Do NOT close the PR. Do NOT delete the workpad. Do NOT recreate the branch. The reviewer's feedback is correction, not redirection.
+
+### Hard-reset flow (only when explicitly triggered)
+
+Only enter this flow if:
+- The most recent REVIEW.md carries a `rebuild-from-scratch` grade on any finding, OR
+- The ticket has the `smithy:hard-reset` label applied by the operator
+
+Steps for hard reset:
+1. Re-read the full issue body and all human comments; identify what will be done differently.
+2. Close the existing PR tied to the issue.
+3. Remove the existing `## Codex Workpad` comment from the issue.
+4. Create a fresh branch from `origin/main`.
+5. Start over from the normal kickoff flow (Step 0 / Step 1).
 
 ## Completion bar before Human Review
 
