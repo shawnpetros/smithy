@@ -18,10 +18,13 @@ defmodule SymphonyElixir.AgentRunner do
 
   require Logger
   alias SymphonyElixir.Codex.AppServer
-  alias SymphonyElixir.{Config, Linear.Issue, Modes, PromptBuilder, Tracker, Workpad, Workspace}
+  alias SymphonyElixir.{Config, Linear.Issue, Modes, PromptBuilder, Telemetry, Tracker, Workpad, Workspace}
   alias SymphonyElixir.Handoff.Review
 
   @type worker_host :: String.t() | nil
+
+  @run_id_pdict_key :smithy_run_id
+  @telemetry_mod_pdict_key :smithy_telemetry_mod
 
   @spec run(map(), pid() | nil, keyword()) :: :ok | no_return()
   def run(issue, codex_update_recipient \\ nil, opts \\ []) do
@@ -30,18 +33,66 @@ defmodule SymphonyElixir.AgentRunner do
 
     mode = Keyword.get(opts, :mode, :builder)
     agent_config = Keyword.get(opts, :agent_config)
+    telemetry_mod = Keyword.get(opts, :telemetry_mod, Telemetry)
+
+    run_id = generate_run_id()
+    run_started_at = System.monotonic_time(:millisecond)
+
+    # Threaded via the process dictionary so deep helpers (per-turn, state
+    # transitions) can correlate without changing internal signatures. The
+    # process is short-lived (one task per ticket) so cross-contamination is
+    # contained.
+    Process.put(@run_id_pdict_key, run_id)
+    Process.put(@telemetry_mod_pdict_key, telemetry_mod)
 
     Logger.info("Starting agent run for #{issue_context(issue)} mode=#{mode} worker_host=#{worker_host_for_log(worker_host)}")
 
-    case mode do
-      :builder ->
-        run_builder_mode(issue, codex_update_recipient, opts, worker_host)
+    safe_emit(telemetry_mod, :session_start,
+      ticket: issue.identifier,
+      mode: mode,
+      runtime: agent_config && agent_config.runtime,
+      persona: agent_config && agent_config.persona,
+      tier: agent_config && agent_config.tier,
+      run_id: run_id
+    )
 
-      :reviewer ->
-        run_reviewer_mode(issue, agent_config, opts, worker_host)
+    try do
+      result =
+        case mode do
+          :builder ->
+            run_builder_mode(issue, codex_update_recipient, opts, worker_host)
 
-      :triager ->
-        run_triager_mode(issue, agent_config, opts, worker_host)
+          :reviewer ->
+            run_reviewer_mode(issue, agent_config, opts, worker_host)
+
+          :triager ->
+            run_triager_mode(issue, agent_config, opts, worker_host)
+        end
+
+      safe_emit(telemetry_mod, :session_end,
+        ticket: issue.identifier,
+        mode: mode,
+        duration_ms: System.monotonic_time(:millisecond) - run_started_at,
+        outcome: :success,
+        run_id: run_id
+      )
+
+      result
+    rescue
+      exception ->
+        safe_emit(telemetry_mod, :session_end,
+          ticket: issue.identifier,
+          mode: mode,
+          duration_ms: System.monotonic_time(:millisecond) - run_started_at,
+          outcome: :error,
+          run_id: run_id,
+          error: Exception.message(exception)
+        )
+
+        reraise exception, __STACKTRACE__
+    after
+      Process.delete(@run_id_pdict_key)
+      Process.delete(@telemetry_mod_pdict_key)
     end
   end
 
@@ -61,18 +112,51 @@ defmodule SymphonyElixir.AgentRunner do
   defp run_reviewer_mode(issue, agent_config, opts, worker_host) do
     reviewer_mod = Keyword.get(opts, :reviewer_mod, Modes.Reviewer)
     mode_opts = mode_opts_from_runner_opts(opts, worker_host)
+    run_id = current_run_id()
+    runtime = agent_config && agent_config.runtime
 
-    with {:ok, workspace} <- Workspace.create_for_issue(issue, worker_host),
-         {:ok, outcome} <- reviewer_mod.run(issue, workspace, agent_config, mode_opts) do
-      handle_reviewer_outcome(issue, outcome, opts)
-      :ok
-    else
-      {:error, reason} ->
-        Logger.error("Reviewer mode failed for #{issue_context(issue)}: #{inspect(reason)}")
-        apply_harness_blocked(issue, "reviewer error: #{inspect(reason)}", opts)
-        :ok
-    end
+    safe_emit_pdict(:turn_start,
+      ticket: issue.identifier,
+      mode: :reviewer,
+      runtime: runtime,
+      run_id: run_id
+    )
+
+    turn_started_at = System.monotonic_time(:millisecond)
+
+    dispatch =
+      with {:ok, workspace} <- Workspace.create_for_issue(issue, worker_host),
+           {:ok, outcome} <- reviewer_mod.run(issue, workspace, agent_config, mode_opts) do
+        {:dispatched, outcome}
+      end
+
+    {turn_outcome, ok_return} =
+      case dispatch do
+        {:dispatched, outcome} ->
+          {reviewer_turn_outcome(outcome), fn -> handle_reviewer_outcome(issue, outcome, opts) end}
+
+        {:error, reason} ->
+          Logger.error("Reviewer mode failed for #{issue_context(issue)}: #{inspect(reason)}")
+          {:error, fn -> apply_harness_blocked(issue, "reviewer error: #{inspect(reason)}", opts) end}
+      end
+
+    safe_emit_pdict(:turn_end,
+      ticket: issue.identifier,
+      mode: :reviewer,
+      runtime: runtime,
+      duration_ms: System.monotonic_time(:millisecond) - turn_started_at,
+      outcome: turn_outcome,
+      run_id: run_id
+    )
+
+    ok_return.()
+    :ok
   end
+
+  defp reviewer_turn_outcome({:pass, _}), do: :success
+  defp reviewer_turn_outcome({:fail, _}), do: :success
+  defp reviewer_turn_outcome({:blocked, _}), do: :error
+  defp reviewer_turn_outcome(_), do: :error
 
   defp handle_reviewer_outcome(issue, {:pass, review}, opts) do
     workpad_append(issue, :adversarial_review, format_review_for_workpad(review, "PASS"), opts)
@@ -94,18 +178,51 @@ defmodule SymphonyElixir.AgentRunner do
   defp run_triager_mode(issue, agent_config, opts, worker_host) do
     triager_mod = Keyword.get(opts, :triager_mod, Modes.Triager)
     mode_opts = mode_opts_from_runner_opts(opts, worker_host)
+    run_id = current_run_id()
+    runtime = agent_config && agent_config.runtime
 
-    with {:ok, workspace} <- Workspace.create_for_issue(issue, worker_host),
-         {:ok, outcome} <- triager_mod.run(issue, workspace, agent_config, mode_opts) do
-      handle_triager_outcome(issue, outcome, opts)
-      :ok
-    else
-      {:error, reason} ->
-        Logger.error("Triager mode failed for #{issue_context(issue)}: #{inspect(reason)}")
-        apply_harness_blocked(issue, "triager error: #{inspect(reason)}", opts)
-        :ok
-    end
+    safe_emit_pdict(:turn_start,
+      ticket: issue.identifier,
+      mode: :triager,
+      runtime: runtime,
+      run_id: run_id
+    )
+
+    turn_started_at = System.monotonic_time(:millisecond)
+
+    dispatch =
+      with {:ok, workspace} <- Workspace.create_for_issue(issue, worker_host),
+           {:ok, outcome} <- triager_mod.run(issue, workspace, agent_config, mode_opts) do
+        {:dispatched, outcome}
+      end
+
+    {turn_outcome, ok_return} =
+      case dispatch do
+        {:dispatched, outcome} ->
+          {triager_turn_outcome(outcome), fn -> handle_triager_outcome(issue, outcome, opts) end}
+
+        {:error, reason} ->
+          Logger.error("Triager mode failed for #{issue_context(issue)}: #{inspect(reason)}")
+          {:error, fn -> apply_harness_blocked(issue, "triager error: #{inspect(reason)}", opts) end}
+      end
+
+    safe_emit_pdict(:turn_end,
+      ticket: issue.identifier,
+      mode: :triager,
+      runtime: runtime,
+      duration_ms: System.monotonic_time(:millisecond) - turn_started_at,
+      outcome: turn_outcome,
+      run_id: run_id
+    )
+
+    ok_return.()
+    :ok
   end
+
+  defp triager_turn_outcome({:proceed, _}), do: :success
+  defp triager_turn_outcome({:flag, _}), do: :success
+  defp triager_turn_outcome({:blocked, _}), do: :error
+  defp triager_turn_outcome(_), do: :error
 
   defp handle_triager_outcome(issue, {:proceed, _triage}, opts) do
     # Builder will be dispatched on the next polling cycle.
@@ -144,11 +261,18 @@ defmodule SymphonyElixir.AgentRunner do
     end
   end
 
-  defp update_issue_state(%Issue{id: issue_id, identifier: identifier}, state_name, opts) do
+  defp update_issue_state(%Issue{id: issue_id, identifier: identifier, state: from_state}, state_name, opts) do
     tracker_mod = Keyword.get(opts, :tracker_mod, Tracker)
 
     case tracker_mod.update_issue_state(issue_id, state_name) do
       :ok ->
+        safe_emit_pdict(:state_transition,
+          ticket: identifier,
+          from_state: from_state,
+          to_state: state_name,
+          run_id: current_run_id()
+        )
+
         :ok
 
       {:error, reason} ->
@@ -304,14 +428,62 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp do_run_codex_turns(app_session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, turn_number, max_turns) do
     prompt = build_turn_prompt(issue, opts, turn_number, max_turns)
+    run_id = current_run_id()
 
-    with {:ok, turn_session} <-
-           AppServer.run_turn(
-             app_session,
-             prompt,
-             issue,
-             on_message: codex_message_handler(codex_update_recipient, issue)
-           ) do
+    safe_emit_pdict(:turn_start,
+      ticket: issue.identifier,
+      mode: :builder,
+      runtime: :codex,
+      turn_number: turn_number,
+      run_id: run_id
+    )
+
+    turn_started_at = System.monotonic_time(:millisecond)
+
+    turn_result =
+      AppServer.run_turn(
+        app_session,
+        prompt,
+        issue,
+        on_message: codex_message_handler(codex_update_recipient, issue)
+      )
+
+    duration_ms = System.monotonic_time(:millisecond) - turn_started_at
+
+    case turn_result do
+      {:ok, turn_session} ->
+        # Token counts: AppServer reports usage via on_message callbacks and
+        # does not surface them in the run_turn return value yet. Emit nils
+        # for now; the AppServer plumbing can be extended in a follow-up.
+        safe_emit_pdict(:turn_end,
+          ticket: issue.identifier,
+          mode: :builder,
+          runtime: :codex,
+          turn_number: turn_number,
+          duration_ms: duration_ms,
+          input_tokens: turn_session[:input_tokens],
+          output_tokens: turn_session[:output_tokens],
+          outcome: :success,
+          run_id: run_id,
+          session_id: turn_session[:session_id]
+        )
+
+        :ok
+
+      {:error, reason} ->
+        safe_emit_pdict(:turn_end,
+          ticket: issue.identifier,
+          mode: :builder,
+          runtime: :codex,
+          turn_number: turn_number,
+          duration_ms: duration_ms,
+          outcome: :error,
+          run_id: run_id,
+          error: inspect(reason)
+        )
+    end
+
+    with {:ok, turn_session} <- turn_result do
       Logger.info("Completed agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
 
       case continue_with_issue?(issue, issue_state_fetcher) do
@@ -412,5 +584,33 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp issue_context(%Issue{id: issue_id, identifier: identifier}) do
     "issue_id=#{issue_id} issue_identifier=#{identifier}"
+  end
+
+  # --- telemetry helpers ---------------------------------------------------
+
+  defp generate_run_id do
+    :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
+  end
+
+  defp current_run_id, do: Process.get(@run_id_pdict_key)
+
+  defp current_telemetry_mod, do: Process.get(@telemetry_mod_pdict_key, Telemetry)
+
+  # Telemetry.emit is already fire-and-forget, but a stubbed telemetry_mod
+  # could raise. Catch everything so a broken emit never crashes the run.
+  defp safe_emit(telemetry_mod, kind, opts) do
+    telemetry_mod.emit(kind, opts)
+    :ok
+  rescue
+    exception ->
+      Logger.warning(
+        "Telemetry emit failed kind=#{inspect(kind)} reason=#{Exception.message(exception)}"
+      )
+
+      :ok
+  end
+
+  defp safe_emit_pdict(kind, opts) do
+    safe_emit(current_telemetry_mod(), kind, opts)
   end
 end

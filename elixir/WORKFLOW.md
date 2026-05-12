@@ -35,6 +35,19 @@ codex:
   thread_sandbox: workspace-write
   turn_sandbox_policy:
     type: workspaceWrite
+agents:
+  builder:
+    mode: builder
+    runtime: codex
+    tier: medium
+    mcp:
+      - linear-read
+  reviewers:
+    - mode: reviewer
+      runtime: claude_code
+      persona: reviewer.md
+      tier: sonnet
+      mcp: []
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`
@@ -108,7 +121,7 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
 - `Todo` -> queued; immediately transition to `In Progress` before active work.
   - Special case: if a PR is already attached, treat as feedback/rework loop (run full PR feedback sweep, address or explicitly push back, revalidate, return to `Human Review`).
 - `In Progress` -> implementation actively underway.
-- `Adversarial Review` -> Smithy-owned audit slot. The build worker transitions here after the PR is open and validated. An external reviewer agent (e.g. [Anvil](https://github.com/shawnpetros/anvil)) polls this state, runs a cross-model review on the diff, and transitions to `Human Review` on pass or `Rework` on fail. The build worker does NOT act on issues in this state. In Smithy alpha-0, the in-process cross-model reviewer is not yet wired; this state is a passthrough slot that integrates with Anvil today.
+- `Adversarial Review` -> Smithy-owned audit slot. The builder agent transitions here after the PR is open and validated. The in-process reviewer agent (configured via the `agents.reviewers` frontmatter block) reads the diff plus workpad, writes `REVIEW.md`, and transitions to `Human Review` on pass or `Rework` on fail. The builder agent does NOT act on issues in this state. External reviewers like [Anvil](https://github.com/shawnpetros/anvil) remain compatible as a drop-in when no in-process reviewer is configured.
 - `Human Review` -> PR is attached and validated; waiting on human approval.
 - `Merging` -> approved by human; execute the `land` skill flow (do not call `gh pr merge` directly).
 - `Rework` -> reviewer requested changes; planning + implementation required.

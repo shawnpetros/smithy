@@ -33,6 +33,19 @@ codex:
   thread_sandbox: workspace-write
   turn_sandbox_policy:
     type: workspaceWrite
+agents:
+  builder:
+    mode: builder
+    runtime: codex
+    tier: medium
+    mcp:
+      - linear-read
+  reviewers:
+    - mode: reviewer
+      runtime: claude_code
+      persona: reviewer.md
+      tier: sonnet
+      mcp: []
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}` against the `anvil-demo-chatbot` repo (Vite + React 18 + TypeScript + Tailwind, three source files of behavior). The repo is cloned at the workspace root. Read `README.md` to orient yourself before planning.

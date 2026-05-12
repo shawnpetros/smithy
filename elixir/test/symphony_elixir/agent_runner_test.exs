@@ -258,6 +258,134 @@ defmodule SymphonyElixir.AgentRunnerTest do
     end
   end
 
+  describe "telemetry emission (sub-pass D)" do
+    setup :stub_workspace_root
+
+    test "run/3 emits :session_start and :session_end with matching run_id (reviewer mode)" do
+      tracker_table = new_stub_table()
+      workpad_table = new_stub_table()
+      telemetry_table = new_stub_table()
+
+      issue =
+        review_issue("issue-tel-session", "MT-TEL-SES", state: "Adversarial Review", labels: [])
+
+      review = %SymphonyElixir.Handoff.Review{
+        status: :pass,
+        findings: [],
+        notes: nil
+      }
+
+      reviewer_stub = fn _issue, _workspace, _agent_config, _opts ->
+        {:ok, {:pass, review}}
+      end
+
+      assert :ok =
+               AgentRunner.run(issue, nil,
+                 mode: :reviewer,
+                 agent_config: reviewer_agent_config(),
+                 reviewer_mod: stub_reviewer(reviewer_stub),
+                 tracker_mod: stub_tracker_mod(tracker_table),
+                 workpad_mod: stub_workpad_mod(workpad_table),
+                 telemetry_mod: stub_telemetry_mod(telemetry_table)
+               )
+
+      events = read_stub_calls(telemetry_table)
+
+      session_starts = for {:emit, :session_start, opts} <- events, do: opts
+      session_ends = for {:emit, :session_end, opts} <- events, do: opts
+
+      assert length(session_starts) == 1
+      assert length(session_ends) == 1
+
+      [start_opts] = session_starts
+      [end_opts] = session_ends
+
+      assert start_opts[:ticket] == "MT-TEL-SES"
+      assert start_opts[:mode] == :reviewer
+      assert is_binary(start_opts[:run_id])
+      assert end_opts[:run_id] == start_opts[:run_id]
+      assert end_opts[:outcome] == :success
+      assert is_integer(end_opts[:duration_ms]) and end_opts[:duration_ms] >= 0
+    end
+
+    test "run/3 emits :state_transition when the outcome triggers a Linear state change" do
+      tracker_table = new_stub_table()
+      workpad_table = new_stub_table()
+      telemetry_table = new_stub_table()
+
+      issue =
+        review_issue("issue-tel-state", "MT-TEL-STATE", state: "Adversarial Review", labels: [])
+
+      review = %SymphonyElixir.Handoff.Review{
+        status: :fail,
+        findings: [%{finding: "blocker", grade: :blocker}],
+        notes: nil
+      }
+
+      reviewer_stub = fn _issue, _workspace, _agent_config, _opts ->
+        {:ok, {:fail, review}}
+      end
+
+      assert :ok =
+               AgentRunner.run(issue, nil,
+                 mode: :reviewer,
+                 agent_config: reviewer_agent_config(),
+                 reviewer_mod: stub_reviewer(reviewer_stub),
+                 tracker_mod: stub_tracker_mod(tracker_table),
+                 workpad_mod: stub_workpad_mod(workpad_table),
+                 telemetry_mod: stub_telemetry_mod(telemetry_table)
+               )
+
+      events = read_stub_calls(telemetry_table)
+      transitions = for {:emit, :state_transition, opts} <- events, do: opts
+
+      assert [opts] = transitions
+      assert opts[:ticket] == "MT-TEL-STATE"
+      assert opts[:from_state] == "Adversarial Review"
+      assert opts[:to_state] == "Rework"
+      assert is_binary(opts[:run_id])
+    end
+
+    test "run/3 still completes when the telemetry_mod raises on emit" do
+      tracker_table = new_stub_table()
+      workpad_table = new_stub_table()
+
+      issue =
+        review_issue("issue-tel-crash", "MT-TEL-CRASH", state: "Adversarial Review", labels: [])
+
+      review = %SymphonyElixir.Handoff.Review{
+        status: :pass,
+        findings: [],
+        notes: nil
+      }
+
+      reviewer_stub = fn _issue, _workspace, _agent_config, _opts ->
+        {:ok, {:pass, review}}
+      end
+
+      # Emit raises every time; safe_emit must swallow it.
+      log =
+        capture_log(fn ->
+          assert :ok =
+                   AgentRunner.run(issue, nil,
+                     mode: :reviewer,
+                     agent_config: reviewer_agent_config(),
+                     reviewer_mod: stub_reviewer(reviewer_stub),
+                     tracker_mod: stub_tracker_mod(tracker_table),
+                     workpad_mod: stub_workpad_mod(workpad_table),
+                     telemetry_mod: SymphonyElixir.AgentRunnerTest.RaisingTelemetryStub
+                   )
+        end)
+
+      # The reviewer outcome still landed on Linear via the tracker stub.
+      assert read_stub_calls(tracker_table) == [
+               {:update_issue_state, "issue-tel-crash", "Human Review"}
+             ]
+
+      assert log =~ "Telemetry emit failed"
+    end
+  end
+
   describe "run/3 with mode: :triager (sub-pass B)" do
     setup :stub_workspace_root
 
@@ -501,6 +629,11 @@ defmodule SymphonyElixir.AgentRunnerTest do
     SymphonyElixir.AgentRunnerTest.WorkpadStub
   end
 
+  defp stub_telemetry_mod(table) do
+    :persistent_term.put({__MODULE__, :telemetry_table, self()}, table)
+    SymphonyElixir.AgentRunnerTest.TelemetryStub
+  end
+
   defmodule ReviewerStub do
     @moduledoc false
 
@@ -555,5 +688,22 @@ defmodule SymphonyElixir.AgentRunnerTest do
       :ets.insert(table, {seq, {:append_section, issue_id, section, content, opts}})
       {:ok, "stub-comment-#{seq}"}
     end
+  end
+
+  defmodule TelemetryStub do
+    @moduledoc false
+
+    def emit(kind, opts) do
+      table = :persistent_term.get({SymphonyElixir.AgentRunnerTest, :telemetry_table, self()})
+      seq = :ets.update_counter(table, :__seq__, {2, 1}, {:__seq__, 0})
+      :ets.insert(table, {seq, {:emit, kind, opts}})
+      :ok
+    end
+  end
+
+  defmodule RaisingTelemetryStub do
+    @moduledoc false
+
+    def emit(_kind, _opts), do: raise("boom")
   end
 end
