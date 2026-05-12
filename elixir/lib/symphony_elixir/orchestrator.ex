@@ -855,6 +855,8 @@ defmodule SymphonyElixir.Orchestrator do
 
     Logger.warning("Retrying issue_id=#{issue_id} issue_identifier=#{identifier} in #{delay_ms}ms (attempt #{next_attempt})#{error_suffix}")
 
+    SymphonyElixir.Alerts.retry_attempt(issue_id, identifier, next_attempt, error)
+
     %{
       state
       | retry_attempts:
@@ -1387,6 +1389,7 @@ defmodule SymphonyElixir.Orchestrator do
   defp apply_codex_rate_limits(%State{} = state, update) when is_map(update) do
     case extract_rate_limits(update) do
       %{} = rate_limits ->
+        SymphonyElixir.Alerts.rate_limits_updated(rate_limits)
         %{state | codex_rate_limits: rate_limits}
 
       _ ->

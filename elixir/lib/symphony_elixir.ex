@@ -29,6 +29,7 @@ defmodule SymphonyElixir.Application do
       SymphonyElixir.Telemetry,
       SymphonyElixir.WorkflowStore,
       SymphonyElixir.Orchestrator,
+      SymphonyElixir.Alerts,
       SymphonyElixir.HttpServer,
       SymphonyElixir.StatusDashboard
     ]
