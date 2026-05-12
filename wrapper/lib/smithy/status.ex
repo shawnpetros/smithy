@@ -43,6 +43,8 @@ defmodule Smithy.Status do
             registered: non_neg_integer(),
             active: non_neg_integer(),
             agents_running: non_neg_integer(),
+            agents_capacity: non_neg_integer() | nil,
+            throughput_tps: number(),
             tokens_in: non_neg_integer(),
             tokens_out: non_neg_integer(),
             tokens_total: non_neg_integer()
@@ -78,41 +80,129 @@ defmodule Smithy.Status do
 
     case http_client.(url) do
       {:ok, payload} when is_map(payload) ->
-        %{slug: repo.slug, port: repo.port, url: url, status: :online, error: nil, payload: payload}
+        %{
+          slug: repo.slug,
+          port: repo.port,
+          url: url,
+          status: :online,
+          error: nil,
+          payload: payload
+        }
 
       {:error, reason} ->
-        %{slug: repo.slug, port: repo.port, url: url, status: :offline, error: reason, payload: nil}
+        %{
+          slug: repo.slug,
+          port: repo.port,
+          url: url,
+          status: :offline,
+          error: reason,
+          payload: nil
+        }
     end
   end
 
   defp totals(statuses, repos) do
     online = Enum.filter(statuses, &(&1.status == :online))
 
-    {tokens_in, tokens_out, tokens_total, agents} =
+    {tokens_in, tokens_out, tokens_total, agents, capacity, capacity_seen?, throughput_tps} =
       online
-      |> Enum.reduce({0, 0, 0, 0}, fn s, {ti, to, tt, ag} ->
-        running = get_in(s.payload, ["counts", "running"]) || 0
+      |> Enum.reduce({0, 0, 0, 0, 0, false, 0}, fn s, {ti, to, tt, ag, cap, cap_seen?, tps} ->
+        running = get_in(s.payload, ["counts", "running"]) |> integer_or_zero()
+        repo_capacity = agent_capacity(s.payload)
 
-        {tin, tout, ttot} =
-          (s.payload["running"] || [])
-          |> Enum.reduce({0, 0, 0}, fn entry, {a, b, c} ->
-            t = entry["tokens"] || %{}
-            {a + (t["input_tokens"] || 0), b + (t["output_tokens"] || 0),
-             c + (t["total_tokens"] || 0)}
-          end)
+        {tin, tout, ttot} = token_totals(s.payload)
 
-        {ti + tin, to + tout, tt + ttot, ag + running}
+        {
+          ti + tin,
+          to + tout,
+          tt + ttot,
+          ag + running,
+          cap + (repo_capacity || 0),
+          cap_seen? or not is_nil(repo_capacity),
+          tps + throughput_tps(s.payload)
+        }
       end)
 
     %{
       registered: length(repos),
       active: length(online),
       agents_running: agents,
+      agents_capacity: if(capacity_seen?, do: capacity, else: nil),
+      throughput_tps: throughput_tps,
       tokens_in: tokens_in,
       tokens_out: tokens_out,
       tokens_total: tokens_total
     }
   end
+
+  defp token_totals(payload) when is_map(payload) do
+    case payload["codex_totals"] do
+      %{} = totals ->
+        {
+          totals["input_tokens"] || 0,
+          totals["output_tokens"] || 0,
+          totals["total_tokens"] || 0
+        }
+
+      _ ->
+        (payload["running"] || [])
+        |> Enum.reduce({0, 0, 0}, fn entry, {a, b, c} ->
+          t = entry["tokens"] || %{}
+
+          {
+            a + (t["input_tokens"] || 0),
+            b + (t["output_tokens"] || 0),
+            c + (t["total_tokens"] || 0)
+          }
+        end)
+    end
+  end
+
+  defp agent_capacity(payload) when is_map(payload) do
+    counts = payload["counts"] || %{}
+
+    capacity =
+      counts["max_agents"] ||
+        counts["max"] ||
+        counts["capacity"] ||
+        payload["max_agents"] ||
+        payload["agent_capacity"]
+
+    integer_or_nil(capacity)
+  end
+
+  defp agent_capacity(_payload), do: nil
+
+  defp throughput_tps(payload) when is_map(payload) do
+    (payload["throughput_tps"] || get_in(payload, ["throughput", "tps"]))
+    |> number_or_zero()
+  end
+
+  defp throughput_tps(_payload), do: 0
+
+  defp integer_or_zero(value), do: integer_or_nil(value) || 0
+
+  defp integer_or_nil(value) when is_integer(value), do: value
+
+  defp integer_or_nil(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {integer, ""} -> integer
+      _ -> nil
+    end
+  end
+
+  defp integer_or_nil(_value), do: nil
+
+  defp number_or_zero(value) when is_number(value), do: value
+
+  defp number_or_zero(value) when is_binary(value) do
+    case Float.parse(String.trim(value)) do
+      {number, ""} -> number
+      _ -> 0
+    end
+  end
+
+  defp number_or_zero(_value), do: 0
 
   defp iso_now do
     DateTime.utc_now()

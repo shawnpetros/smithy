@@ -46,7 +46,8 @@ smithy version
 smithy add-repo <slug> <path> [--workflow PATH] [--port PORT]
 smithy remove-repo <slug>
 smithy list-repos
-smithy status [--web] [--json]    # bellows / forge are aliases
+smithy status [--web] [--json] [--snapshot] [--interval 5s]
+                                     # bellows / forge are aliases
 smithy dashboard [slug]
 smithy logs <slug> [--follow]
 smithy daemon {start|stop|restart} [slug]
@@ -84,11 +85,14 @@ Logs land at `~/.smithy/logs/<slug>/{stdout,stderr}.log`.
 
 `smithy status` queries each registered repo's `GET /api/v1/state` (the existing
 endpoint exposed by `SymphonyElixirWeb.ObservabilityApiController.state/2`) and
-renders a single block. Offline repos render as `[slug]  OFFLINE  ...  (daemon down)`
-rather than crashing the aggregate.
+enters a bordered, refreshing aggregate terminal UI. It redraws every second by
+default, supports `q`/Ctrl-C to quit, `r` to refresh immediately, `?` to toggle
+expanded help, and arrow keys or `j`/`k` to scroll overflowing rows. Offline repos
+render as `[slug] OFFLINE — daemon down` rather than crashing the aggregate.
 
-`--json` emits structured output suitable for piping. `--web` opens an iframe-grid
-HTML page at `~/.smithy/dashboard.html`.
+`--snapshot` emits a single ANSI frame suitable for scripts that expect one-shot
+terminal output. `--json` emits structured output suitable for piping. `--web`
+opens an iframe-grid HTML page at `~/.smithy/dashboard.html`.
 
 ## Tests
 
