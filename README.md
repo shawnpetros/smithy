@@ -77,25 +77,28 @@ OpenAI's Symphony is genuinely good. Phoenix LiveView dashboard, OTP supervision
 
 Apache-2.0 lets the fork redistribute and credit upstream. Smithy tracks Symphony main with discipline. Upstream improvements pull through; Smithy's opinions live in additive files and clearly-marked patches.
 
-## Install (alpha-0)
+## Install (alpha-1 preview)
 
-Same prerequisites as Symphony: Erlang/Elixir via mise, Codex CLI, a Linear API token. Then:
+Same prerequisites as Symphony: Erlang/Elixir via mise, Codex CLI, and a Linear API token. Then:
 
 ```bash
 git clone git@github.com:shawnpetros/smithy.git
-cd smithy/elixir
-mise trust && mise exec -- mix deps.get
+cd smithy
+make install
 ```
 
-Copy `examples/chatbot-demo-workflow.md` to your project root as `WORKFLOW.md` (or write your own; that file is documented as a template). Run:
+`make install` trusts the `wrapper/` and `elixir/` mise configs, fetches deps, builds both escripts, links `smithy` and `symphony` into `~/.local/bin`, and verifies both commands resolve on `PATH`. Use `make install PREFIX=/usr/local` to install somewhere else.
+
+After install, register a repo and start its daemon:
 
 ```bash
-mise exec -- ./bin/symphony /path/to/your/WORKFLOW.md
+smithy add-repo <slug> <repo-path>
+smithy daemon start <slug>
 ```
 
-(The binary name is still `symphony` in alpha-0; rename to `smithy` lands in alpha-1.)
+The first gated daemon action prompts for the hold-harmless acknowledgement if you have not already run `smithy acknowledge`.
 
-For the `Adversarial Review` reviewer, run [Anvil](https://github.com/shawnpetros/anvil) as a sibling process pointed at the same Linear team and project. Anvil writes its verdict back to the same `## Codex Workpad` comment Smithy's worker is already using.
+For local iteration, use `make rebuild` to rebuild both escripts without fetching deps, `make test` to run installer and project tests, `make clean` to remove build artifacts, and `make uninstall` to remove the installed links.
 
 ## The naming family
 
