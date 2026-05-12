@@ -64,6 +64,7 @@ defmodule Smithy.CLITest do
   describe "hold-harmless gating" do
     setup do
       :ok = Acknowledge.reset()
+
       on_exit(fn ->
         seeded =
           Config.defaults()
@@ -95,6 +96,11 @@ defmodule Smithy.CLITest do
       # status reaches its handler (then may fail for other reasons), but
       # it does NOT trip the gate.
       assert {:ok, _} = CLI.dispatch(["status", "--json"])
+    end
+
+    test "status snapshot flag is accepted by option parsing" do
+      assert {:ok, out} = CLI.dispatch(["status", "--snapshot"])
+      assert out =~ "SMITHY STATUS"
     end
 
     test "version NOT gated" do
@@ -135,9 +141,11 @@ defmodule Smithy.CLITest do
     end
 
     test "rejects duplicate slug" do
-      cfg = Smithy.Config.defaults() |> Map.put(:repos, [
-        %{slug: "smithy", path: "/x", workflow: "WORKFLOW.md", port: 4001}
-      ])
+      cfg =
+        Smithy.Config.defaults()
+        |> Map.put(:repos, [
+          %{slug: "smithy", path: "/x", workflow: "WORKFLOW.md", port: 4001}
+        ])
 
       deps = %{
         load: fn -> {:ok, cfg} end,
@@ -154,16 +162,21 @@ defmodule Smithy.CLITest do
     alias Smithy.Commands.DaemonCmd
 
     test "start with no slug iterates all repos" do
-      cfg = Smithy.Config.defaults() |> Map.put(:repos, [
-        %{slug: "a", path: "/x", workflow: "WORKFLOW.md", port: 4001},
-        %{slug: "b", path: "/y", workflow: "WORKFLOW.md", port: 4002}
-      ])
+      cfg =
+        Smithy.Config.defaults()
+        |> Map.put(:repos, [
+          %{slug: "a", path: "/x", workflow: "WORKFLOW.md", port: 4001},
+          %{slug: "b", path: "/y", workflow: "WORKFLOW.md", port: 4002}
+        ])
 
       pid = self()
 
       deps = %{
         load: fn -> {:ok, cfg} end,
-        load_action: fn slug -> send(pid, {:start, slug}); {:ok, ""} end,
+        load_action: fn slug ->
+          send(pid, {:start, slug})
+          {:ok, ""}
+        end,
         unload_action: fn _ -> {:ok, ""} end,
         restart_action: fn _ -> {:ok, ""} end
       }
@@ -190,17 +203,58 @@ defmodule Smithy.CLITest do
   describe "status command (mocked deps)" do
     alias Smithy.Commands.StatusCmd
 
-    test "renders TUI" do
-      cfg = Smithy.Config.defaults() |> Map.put(:repos, [
-        %{slug: "a", path: "/x", workflow: "WORKFLOW.md", port: 4001}
-      ])
+    test "default mode starts the interactive TUI" do
+      cfg =
+        Smithy.Config.defaults()
+        |> Map.put(:repos, [
+          %{slug: "a", path: "/x", workflow: "WORKFLOW.md", port: 4001}
+        ])
+
+      pid = self()
+
+      deps = %{
+        load: fn -> {:ok, cfg} end,
+        collect: fn _ ->
+          flunk("default interactive mode should not collect a one-shot snapshot")
+        end,
+        write_dashboard: fn _ -> {:ok, "/tmp/d.html"} end,
+        open: fn _ -> {:ok, ""} end,
+        interactive: fn config, tui_opts ->
+          send(pid, {:interactive, config, tui_opts})
+          :ok
+        end
+      }
+
+      assert {:ok, ""} = StatusCmd.run([], %{}, deps)
+      assert_received {:interactive, ^cfg, %{interval_ms: 1_000}}
+    end
+
+    test "--snapshot renders one-shot TUI" do
+      cfg =
+        Smithy.Config.defaults()
+        |> Map.put(:repos, [
+          %{slug: "a", path: "/x", workflow: "WORKFLOW.md", port: 4001}
+        ])
 
       agg = %{
-        repos: [%{slug: "a", port: 4001, url: "http://localhost:4001/api/v1/state",
-                  status: :online, error: nil,
-                  payload: %{"counts" => %{"running" => 0}, "running" => []}}],
-        totals: %{registered: 1, active: 1, agents_running: 0,
-                  tokens_in: 0, tokens_out: 0, tokens_total: 0},
+        repos: [
+          %{
+            slug: "a",
+            port: 4001,
+            url: "http://localhost:4001/api/v1/state",
+            status: :online,
+            error: nil,
+            payload: %{"counts" => %{"running" => 0}, "running" => []}
+          }
+        ],
+        totals: %{
+          registered: 1,
+          active: 1,
+          agents_running: 0,
+          tokens_in: 0,
+          tokens_out: 0,
+          tokens_total: 0
+        },
         generated_at: "2026-05-12T00:00:00Z"
       }
 
@@ -208,12 +262,32 @@ defmodule Smithy.CLITest do
         load: fn -> {:ok, cfg} end,
         collect: fn _ -> agg end,
         write_dashboard: fn _ -> {:ok, "/tmp/d.html"} end,
-        open: fn _ -> {:ok, ""} end
+        open: fn _ -> {:ok, ""} end,
+        interactive: fn _, _ -> flunk("snapshot mode should not start interactive TUI") end
       }
 
-      assert {:ok, out} = StatusCmd.run([], %{}, deps)
+      assert {:ok, out} = StatusCmd.run([], %{snapshot: true}, deps)
       assert out =~ "SMITHY STATUS"
       assert out =~ "[a]"
+    end
+
+    test "--interval is parsed for interactive mode" do
+      cfg = Smithy.Config.defaults()
+      pid = self()
+
+      deps = %{
+        load: fn -> {:ok, cfg} end,
+        collect: fn _ -> flunk("interactive mode should not collect a one-shot snapshot") end,
+        write_dashboard: fn _ -> {:ok, ""} end,
+        open: fn _ -> {:ok, ""} end,
+        interactive: fn _config, tui_opts ->
+          send(pid, {:interval, tui_opts.interval_ms})
+          :ok
+        end
+      }
+
+      assert {:ok, ""} = StatusCmd.run([], %{interval: "5s"}, deps)
+      assert_received {:interval, 5_000}
     end
 
     test "--json emits JSON" do
@@ -221,8 +295,14 @@ defmodule Smithy.CLITest do
 
       agg = %{
         repos: [],
-        totals: %{registered: 0, active: 0, agents_running: 0,
-                  tokens_in: 0, tokens_out: 0, tokens_total: 0},
+        totals: %{
+          registered: 0,
+          active: 0,
+          agents_running: 0,
+          tokens_in: 0,
+          tokens_out: 0,
+          tokens_total: 0
+        },
         generated_at: "2026-05-12T00:00:00Z"
       }
 
@@ -230,12 +310,52 @@ defmodule Smithy.CLITest do
         load: fn -> {:ok, cfg} end,
         collect: fn _ -> agg end,
         write_dashboard: fn _ -> {:ok, ""} end,
-        open: fn _ -> {:ok, ""} end
+        open: fn _ -> {:ok, ""} end,
+        interactive: fn _, _ -> flunk("json mode should not start interactive TUI") end
       }
 
       assert {:ok, out} = StatusCmd.run([], %{json: true}, deps)
       assert {:ok, decoded} = Jason.decode(out)
       assert decoded["totals"]["registered"] == 0
+    end
+
+    test "--json normalizes offline error terms" do
+      cfg = Smithy.Config.defaults() |> Map.put(:repos, [])
+
+      agg = %{
+        repos: [
+          %{
+            slug: "offline",
+            port: 4999,
+            url: "http://localhost:4999/api/v1/state",
+            status: :offline,
+            error: {:failed_connect, [{:inet, [:inet], :econnrefused}]},
+            payload: nil
+          }
+        ],
+        totals: %{
+          registered: 1,
+          active: 0,
+          agents_running: 0,
+          tokens_in: 0,
+          tokens_out: 0,
+          tokens_total: 0
+        },
+        generated_at: "2026-05-12T00:00:00Z"
+      }
+
+      deps = %{
+        load: fn -> {:ok, cfg} end,
+        collect: fn _ -> agg end,
+        write_dashboard: fn _ -> {:ok, ""} end,
+        open: fn _ -> {:ok, ""} end,
+        interactive: fn _, _ -> flunk("json mode should not start interactive TUI") end
+      }
+
+      assert {:ok, out} = StatusCmd.run([], %{json: true}, deps)
+      assert {:ok, decoded} = Jason.decode(out)
+      assert decoded["repos"] |> hd() |> Map.fetch!("status") == "offline"
+      assert decoded["repos"] |> hd() |> Map.fetch!("error") =~ "failed_connect"
     end
   end
 end

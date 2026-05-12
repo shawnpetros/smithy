@@ -29,7 +29,8 @@ Smithy wrapper (the daemon supervisor + CLI)
 ├── Repo registry (~/.smithy/config.toml)
 ├── launchd/systemd plist generation per registered repo
 ├── CLI binary
-│   ├── smithy status [--web]      → aggregate TUI, --web opens unified dashboard
+│   ├── smithy status [--web|--json|--snapshot] [--interval 5s]
+│   │                              → aggregate TUI, --web opens unified dashboard
 │   ├── smithy dashboard [slug]    → no slug: aggregate web; with slug: that repo's LiveView
 │   ├── smithy logs <slug>         → tail one repo's daemon log
 │   ├── smithy bellows / forge     → themed status aliases
@@ -374,34 +375,26 @@ systemd unit template ships for Linux. Same shape.
 
 ### Aggregate TUI
 
-`smithy status` queries each registered Symphony's HTTP API (`/api/v1/state` or equivalent) and renders an aggregate terminal block. Layout draws from Symphony's existing single-repo TUI:
+`smithy status` queries each registered Symphony's HTTP API (`/api/v1/state` or equivalent) and renders an aggregate terminal TUI. Layout draws from Symphony's existing single-repo TUI:
 
 ```
-SMITHY STATUS
-Repos: 3 active / 3 registered
-Total Agents: 27/100   Throughput: 1,234,567 tps   Uptime: 2d 14h 32m
-Tokens (all repos): in 142M  |  out 8.3M  |  total 150M
-
-──────────────────────────────────────────────────────────────────────────
-[smithy]  19/50 agents  658k tps  http://localhost:4001
-  MT-725  Todo         1m 19s  1,442,520 tok  command output streaming
-  MT-726  In Progress  1m 19s  1,664,641 tok  reasoning rs_08aab3ca0
-  ...
-
-[substrate]  6/30 agents  421k tps  http://localhost:4002
-  PER-99  In Progress  3m 42s  892,317 tok  turn diff updated
-  ...
-
-[content-pipeline]  2/20 agents  155k tps  http://localhost:4003
-  CON-12  Adversarial Review  0m 45s  421,889 tok  reviewer started
-  ...
-──────────────────────────────────────────────────────────────────────────
-
-Backoff queue: 0 entries across all repos
-Next refresh: 1s
+╭─ SMITHY STATUS ─────────────────────────────────────────────────────╮
+│ Repos: 3 active / 3 registered                                      │
+│ Total Agents: 27/100 across repos                                   │
+│ Throughput: 1,234,567 tps                                           │
+│ Tokens: in 142,000,000 | out 8,300,000 | total 150,300,000          │
+│ Generated: 2026-05-12T12:00:00Z                                     │
+│ Next refresh: 1s                                                    │
+├─ [smithy] Running ──────────────────────────────────────────────────┤
+│  ID       STAGE          PID      AGE / TURN   TOKENS     SESSION  EVENT
+│  MT-725   Todo           12345    1m 19s / 2   1,442,520  abcd...  command output streaming
+├─ Backoff queue ─────────────────────────────────────────────────────┤
+│  No queued retries                                                  │
+│ ↑/↓ scroll • r refresh • ? help • q quit                            │
+╰─────────────────────────────────────────────────────────────────────╯
 ```
 
-Single source of polling: Smithy's CLI process queries each Symphony's HTTP API every refresh_interval; renders in foreground. Themed aliases (`smithy bellows`, `smithy forge`) print the same view.
+Single source of polling: Smithy's CLI process queries each Symphony's HTTP API every refresh_interval; renders in foreground. Themed aliases (`smithy bellows`, `smithy forge`) show the same interactive view. `smithy status --snapshot` preserves one-shot terminal output for scripts, and `--json` remains one-shot structured output.
 
 ### Browser dashboard
 

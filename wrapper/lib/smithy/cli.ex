@@ -25,6 +25,8 @@ defmodule Smithy.CLI do
     follow: :boolean,
     web: :boolean,
     json: :boolean,
+    snapshot: :boolean,
+    interval: :string,
     help: :boolean,
     auto: :boolean,
     reset: :boolean
@@ -59,7 +61,11 @@ defmodule Smithy.CLI do
         exit_with(66)
 
       {:error, :acknowledgement_required} ->
-        IO.puts(:stderr, "error: hold-harmless acknowledgement required. Run `smithy acknowledge` first.")
+        IO.puts(
+          :stderr,
+          "error: hold-harmless acknowledgement required. Run `smithy acknowledge` first."
+        )
+
         exit_with(67)
 
       {:error, :declined} ->
@@ -160,7 +166,8 @@ defmodule Smithy.CLI do
       remove-repo <slug>                   deregister + stop + remove plist
       list-repos                           print registered repos
 
-      status [--web] [--json]              aggregate TUI; --web opens browser
+      status [--web] [--json] [--snapshot] aggregate TUI; --web opens browser
+        --interval 5s                      refresh interval for interactive status
       bellows                              alias for status
       forge                                alias for status
       dashboard [slug]                     open repo or aggregate dashboard
