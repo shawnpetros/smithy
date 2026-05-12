@@ -500,7 +500,7 @@ defmodule SymphonyElixir.AgentRunner do
     with {:ok, turn_session} <- turn_result do
       Logger.info("Completed agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
 
-      case continue_with_issue?(issue, issue_state_fetcher) do
+      case continue_with_issue?(issue, issue_state_fetcher, :builder) do
         {:continue, refreshed_issue} when turn_number < max_turns ->
           Logger.info("Continuing agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
 
@@ -587,7 +587,7 @@ defmodule SymphonyElixir.AgentRunner do
 
         Logger.info("Completed Claude builder turn for #{issue_context(issue)} session_id=#{summary[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
 
-        case continue_with_issue?(issue, issue_state_fetcher) do
+        case continue_with_issue?(issue, issue_state_fetcher, :builder) do
           {:continue, refreshed_issue} when turn_number < max_turns ->
             do_run_claude_turns(session, workspace, refreshed_issue, recipient, opts, issue_state_fetcher, turn_number + 1, max_turns)
 
@@ -640,13 +640,38 @@ defmodule SymphonyElixir.AgentRunner do
     """
   end
 
-  defp continue_with_issue?(%Issue{id: issue_id} = issue, issue_state_fetcher) when is_binary(issue_id) do
+  # Decide whether the current agent loop should continue with another turn.
+  #
+  # Two checks gate continuation:
+  #
+  # 1. Is the issue still in an active (non-terminal) state? Terminal states
+  #    (Done, Closed, Cancelled, etc.) always return `:done`.
+  # 2. Does the current state still map to the agent's mode? An agent dispatched
+  #    as `:builder` should NOT keep looping after the issue transitions to
+  #    `Adversarial Review`. The agent's work caused that transition; the next
+  #    dispatch should be `:reviewer`. Returning `:done` here yields control
+  #    back to the orchestrator, which re-evaluates mode on its next poll.
+  #
+  # Without check #2, builder loops empty turns ("I shouldn't act on
+  # Adversarial Review") until max_turns, wasting input tokens (PER-192).
+  defp continue_with_issue?(%Issue{id: issue_id} = issue, issue_state_fetcher, mode)
+       when is_binary(issue_id) do
     case issue_state_fetcher.([issue_id]) do
       {:ok, [%Issue{} = refreshed_issue | _]} ->
-        if active_issue_state?(refreshed_issue.state) do
-          {:continue, refreshed_issue}
-        else
-          {:done, refreshed_issue}
+        cond do
+          not active_issue_state?(refreshed_issue.state) ->
+            {:done, refreshed_issue}
+
+          not state_matches_mode?(refreshed_issue.state, mode) ->
+            Logger.info(
+              "Issue #{refreshed_issue.identifier} state=#{refreshed_issue.state} " <>
+                "no longer matches agent mode=#{mode}; returning to orchestrator for re-dispatch"
+            )
+
+            {:done, refreshed_issue}
+
+          true ->
+            {:continue, refreshed_issue}
         end
 
       {:ok, []} ->
@@ -657,8 +682,12 @@ defmodule SymphonyElixir.AgentRunner do
     end
   end
 
-  defp continue_with_issue?(issue, _issue_state_fetcher), do: {:done, issue}
+  defp continue_with_issue?(issue, _issue_state_fetcher, _mode), do: {:done, issue}
 
+  # Active-state predicate is config-driven (tracker.active_states in WORKFLOW.md).
+  # Mode-state alignment is hardcoded here because it expresses the state machine
+  # contract, not operator preference: a builder's territory is Todo/In Progress/
+  # Rework/Merging, a reviewer's is Adversarial Review, a triager's is Todo.
   defp active_issue_state?(state_name) when is_binary(state_name) do
     normalized_state = normalize_issue_state(state_name)
 
@@ -667,6 +696,19 @@ defmodule SymphonyElixir.AgentRunner do
   end
 
   defp active_issue_state?(_state_name), do: false
+
+  defp state_matches_mode?(state, mode) when is_binary(state) and is_atom(mode) do
+    normalized = normalize_issue_state(state)
+
+    case mode do
+      :builder -> normalized in ["todo", "in progress", "rework", "merging"]
+      :reviewer -> normalized == "adversarial review"
+      :triager -> normalized == "todo"
+      _ -> true
+    end
+  end
+
+  defp state_matches_mode?(_state, _mode), do: true
 
   defp selected_worker_host(nil, []), do: nil
 
