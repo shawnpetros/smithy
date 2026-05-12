@@ -1,402 +1,597 @@
-# Smithy v2 Architecture Spec
+# Smithy v2.1 Architecture Spec
 
-**Status:** Draft. The polished v2 design that the public release of Smithy is built against.
-**Authors:** Shawn Petros, with Claude (Anthropic Opus 4.7) as paired engineer.
+**Status:** Draft, 2026-05-11. Replaces v2/history/2026-05-06-v2-fork-spec-original.md.
+**Authors:** Shawn Petros, with Claude (Anthropic Opus 4.7, 1M context) as paired engineer.
 **Inputs:**
-- `history/2026-05-06-v1-pilot-spec.md` (the v1 cut, authored after running an end-to-end Symphony pilot against a real Linear ticket)
-- Pilot post-mortem (private)
-- Session transcript dated 2026-05-06 where the v2 wishlist was articulated
 
-> **Symphony** in this document refers to OpenAI's open-source coding-agent harness (github.com/openai/symphony, Apache-2.0). It polls an issue tracker (Linear in this version), creates a per-issue workspace, and runs an OpenAI Codex CLI session against each ticket via Codex's app-server mode. Workflow is configured via a single `WORKFLOW.md` file. Smithy v2 is a fork of Symphony with targeted opinion layers.
+- `v2/history/2026-05-06-v1-pilot-spec.md` (v1 pilot architecture, kept for context)
+- `v2/history/2026-05-06-v2-fork-spec-original.md` (the prior v2 fork plan; superseded)
+- `v2/history/2026-05-11-claude-code-adapter-spike.md` (Claude Code adapter validation)
+- `v2/edge-cases.md` (12 failure modes specified for v1)
+- 2026-05-11 brainstorm session (Shawn + Argyle)
 
 ---
 
 ## Goal
 
-Smithy v2 is a fork of OpenAI Symphony plus a layered set of opinions that make it usable as a polished, multi-tenant agent harness. v2 promotes most of what Symphony's spec deferred to "future work" into shipping defaults:
+Smithy v2.1 is a thin multi-repo supervisor wrapping a configurable fork of OpenAI Symphony (Elixir). The fork stays close to upstream and grows three orthogonal config axes per agent invocation: `mode`, `runtime`, `persona`. Anvil's adversarial reviewer logic ports inward as `mode: reviewer`; Anvil retires as a separate component.
 
-1. Dual agent runtimes (Claude Code AND Codex) selected per ticket via label.
-2. Cross-model adversarial review (different model family reviews than builds).
-3. Spec sufficiency triage at the front of the queue, dropping bad tickets out before they reach a builder.
-4. Linear OAuth identity so Smithy commits, comments, and state moves audit-trail to a service account, not a personal API key.
-5. Label-gated autonomous merge (opt-in, label-scoped) and label-driven runtime routing.
-6. SQLite-backed run history with model-summarized logs surfaced in the dashboard.
-7. Token cost tracking with per-tenant rollups and spend-cap alerts.
-8. Max-retry circuit breaker with `harness-blocked` escalation.
-9. Bootstrap-PR pattern for new target repos (`smithy bootstrap <repo>`).
-10. Workpad reuse: a single per-ticket comment thread with progress notes (Symphony's native pattern, kept).
+The opinion layer is mostly absorbed INTO Symphony itself rather than running above it. Smithy's job is to supervise N Symphony instances across N repos, surface an aggregate TUI, expose themed CLI affordances, and handle self-update.
 
-The v1 spec in `history/` was the conservative cut. v2 is the all-in-one.
+This replaces the prior "orchestrator above Symphony with proto/ comms" pitch from 2026-05-11 morning. That pivot was overengineered for v1.
 
 ---
 
-## Why fork
-
-Symphony's polish is real. Its Phoenix LiveView dashboard, Codex app-server integration, supervised polling loop, per-issue workspaces, and structured logging are six months of OpenAI's engineering effort that Smithy gets for free. Reproducing that surface in Rust would burn weeks for parity, before adding any opinion layer.
-
-The fork inherits Symphony's bones. Smithy v2 adds the opinions on top:
-
-| Symphony provides | Smithy v2 adds |
-|---|---|
-| Polling loop, per-issue workspaces, dispatch with bounded concurrency | Dual-runtime dispatch (Claude Code + Codex) |
-| Codex app-server runtime | Claude Agent SDK runtime, label-driven routing |
-| Phoenix LiveView dashboard | SQLite-backed history tab, model-summarized run logs, cost rollups |
-| `WORKFLOW.md` state machine | Spec sufficiency triage step, Adversarial Review state |
-| `tracker.labels` queue gate (added during v1 pilot, currently in fork only) | Full label vocabulary (`agent-ready`, `needs-spec`, `harness-blocked`, runtime labels, autonomous-merge label) |
-| Personal-API-key Linear access | Linear OAuth client + Smithy service-account identity |
-| `gh auth token` borrow | GitHub App identity |
-| Codex sandbox seatbelt | Custom seatbelt profile (allow `.git/` writes + network only) |
-| Per-issue retries with no ceiling | Max-retry circuit breaker with `harness-blocked` escalation |
-| Persistent worktrees (good for warm review) | Configurable retention policy |
-
----
-
-## Architecture overview
-
-Smithy v2 keeps Symphony's elixir + OTP runtime intact. The opinion layer plugs in at four extension points: configuration schema, the `WORKFLOW.md` state machine, the dispatch worker, and the LiveView dashboard.
+## Layered architecture
 
 ```
-Ticket flow (v2):
-
-[ agent-ready label applied by human ]
-              |
-              v
-[ Ready for Dev ]
-              |
-              v
-       spec quality gate (front-of-queue triage)
-              |
-        ----- ----- 
-       |           |
-       v           v
-   FLAG (drop      PROCEED
-   to Backlog
-   + needs-spec)   |
-                   v
-        runtime selected by label
-        (codex OR claude OR default)
-                   |
-                   v
-[ In Progress ] (worker spawned, workpad comment opened, progress notes streamed)
-                   |
-                   v
-[ Adversarial Review ] (different model family reviews)
-                   |
-        ----- ----- ----- 
-       |           |     |
-       v           v     v
-   FAIL        PASS   BLOCKED
-   (back to    |     (harness-blocked
-   Todo with   |      label, In Review)
-   findings)   |
-               v
-   [ autonomous-merge label set? ]
-               |
-        ----- -----
-       |           |
-       v           v
-   YES (auto    NO (human
-   merge +      review at
-   close)       In Review)
-                   |
-                   v
-              [ Done ]
+Smithy wrapper (the daemon supervisor + CLI)
+├── Repo registry (~/.smithy/config.toml)
+├── launchd/systemd plist generation per registered repo
+├── CLI binary
+│   ├── smithy status [--web]      → aggregate TUI, --web opens unified dashboard
+│   ├── smithy dashboard [slug]    → no slug: aggregate web; with slug: that repo's LiveView
+│   ├── smithy logs <slug>         → tail one repo's daemon log
+│   ├── smithy bellows / forge     → themed status aliases
+│   ├── smithy daemon {start|stop|restart} [slug]
+│   ├── smithy add-repo <slug> <path> [--workflow PATH]
+│   └── smithy remove-repo <slug>
+├── Heartbeat collation (queries each Symphony's HTTP API)
+└── Self-update flow coordination (drain → rebuild → respawn)
+        │ supervises
+        ▼
+Symphony instance (one per registered repo)
+├── Polling loop (Linear)
+├── Per-issue workspaces (~/code/<repo>-workspaces/<ticket>)
+├── State machine (existing + Adversarial Review state slot)
+├── Phoenix LiveView dashboard (localhost:<assigned-port>)
+├── TUI status board (existing, already shipped, displays in foreground mode)
+├── Workpad comment management
+├── SQLite run history (alpha-2)
+├── Three-axis agent dispatch:
+│   - mode    : builder | reviewer | triager
+│   - runtime : codex | claude-code
+│   - persona : markdown file (priv/personas/<name>.md)
+│   - mcp     : whitelist of MCP bundle names
+│   - tier    : opus | sonnet | haiku (runtime-specific tier mapping)
+        │ spawns
+        ▼
+Agent subprocess (Codex CLI or Claude Code CLI)
+├── One mode, one runtime, one persona per spawn
+├── Reads ticket context + persona body via argv/stdin
+├── Writes JSONL events to stdout (Symphony parses)
+├── On exit: writes RESULT.md (builder) or REVIEW.md (reviewer) or TRIAGE.md (triager)
+└── Symphony parses structured handoff, transitions Linear state
 ```
+
+The carving: Smithy owns multi-repo orchestration and operator CLI. Symphony owns harness work for one repo (polling, workspaces, state machine, dashboard, persistence, agent dispatch). Agent subprocesses own one model turn each. No shared mutable state across layers; boundaries are launchd plus heartbeat files (Smithy ↔ Symphony) and stdio plus on-disk handoff artifacts (Symphony ↔ agent).
 
 ---
 
-## Core capabilities (v2)
+## Three-axis agent config
 
-### 1. Dual agent runtimes
+The core opinion shift in Symphony. A workflow declares its agents in YAML frontmatter:
 
-Each ticket carries a runtime label that selects which agent stack handles it. Defaults to the configured `default_runtime` if no label is present. v1 supports `runtime/codex` (Codex CLI app-server mode, inherited from Symphony) and `runtime/claude-code` (Claude Agent SDK headless mode). Other runtimes can be added by extending the dispatch enum.
+```yaml
+agents:
+  builder:
+    mode: builder
+    runtime: codex
+    persona: builder-default.md
+    mcp:
+      - linear-read
+    tier: medium
 
-The runtime decision is captured at dispatch time and recorded in the run row so history queries can group by runtime.
+  reviewer:
+    mode: reviewer
+    runtime: claude-code
+    persona: reviewer.md
+    mcp: []
+    tier: sonnet
 
-### 2. Cross-model adversarial review
-
-Adversarial review runs in a separate model family from the build. If the build was Claude Code, review is Codex (or whatever model family is configured for review of Claude builds). If the build was Codex, review is Claude. The persona swap is via prompt; the model swap is via configured pairing in `WORKFLOW.md`.
-
-The review agent receives the diff via `gh pr diff <n>` from a fresh clone of the workspace at the build commit. Warm-workspace review (current behavior) was empirically tested; cold-clone review is the v2 default because it forces the review to read the diff rather than navigate the workspace mid-build.
-
-### 3. Spec sufficiency triage
-
-A triage step at the front of the queue runs before dispatch. The triage agent answers four questions about the ticket:
-
-- **Where:** is the file / module / feature unambiguously identified?
-- **What:** is there a clear delta requested (feature, fix, refactor, doc) and a clear scope?
-- **Acceptance:** is the success criterion testable or otherwise verifiable?
-- **Ambiguity:** are there punt phrases ("we should discuss," "TBD"), missing product decisions, or multiple plausible implementations?
-
-If any answer is no, the triage agent FLAGs the ticket: applies the `needs-spec` label, removes `agent-ready`, moves to Backlog, and posts a structured gap comment listing which questions failed.
-
-If all four pass, triage exits and dispatch proceeds.
-
-Trivial tickets (typo fixes, version bumps, obvious one-liners) bypass triage if the title alone is sufficient spec; the triage prompt has a proportionality clause.
-
-Triage actions are atomic: one model turn, then the triage agent ends. Failed triage does not retry; the ticket sits in Backlog until a human re-specs and re-applies `agent-ready`.
-
-### 4. Adversarial review pass
-
-After the build worker exits with a PR open, the orchestrator transitions the Linear ticket to `Adversarial Review`. This triggers the reviewer agent (cross-model per §2). The reviewer evaluates the diff against the spec on a structured rubric: correctness, scope creep, security implications, test coverage, and red-flag patterns documented in the target repo's `AGENTS.md`. The reviewer writes `REVIEW.md` with a structured PASS / FAIL / BLOCKED verdict.
-
-- PASS: orchestrator transitions to `In Review` (or to `Done` if the autonomous-merge label is set, see §5).
-- FAIL: orchestrator transitions back to Todo with findings appended to the workpad comment under `### Adversarial Review` (see §11). The next build attempt reads that section as authoritative review feedback.
-- BLOCKED: orchestrator applies `harness-blocked` label, transitions to `In Review`, posts the block reason in the workpad. Human triages.
-
-Independent context: the reviewer runs in a fresh model session, with no prompt visibility into the build worker's reasoning. The reviewer sees only the diff, the spec (Linear ticket body and comments), and the repo's `AGENTS.md`.
-
-Persona list, not single persona. The reviewer dispatch is modeled as a list of `{persona_path, model_hint}` entries from the workflow config, not a single persona reference. Alpha-1 ships length-1 (one reviewer per ticket), preserving vanilla cross-model semantics. Length-N panel review (multiple reviewers grading independently, results aggregated by a synthesizer) is the carve-out for §12 speccing-mode and lands in alpha-3+. Modeling the field as a list from day one keeps that path open without alpha-1 paying for it.
-
-### 5. Label-gated autonomous merge
-
-A ticket carrying the `auto-merge` label, when it passes adversarial review, is merged and closed automatically. No `In Review` human gate. This is opt-in per ticket.
-
-The `auto-merge` label is human-applied. The harness never sets it. Operators apply it for low-risk changes (dependency bumps, doc updates, isolated bug fixes with full test coverage). For higher-risk work, leave the label off and the human review at `In Review` is required as in v1.
-
-This is the "we don't want that kinda craziness yet, but it should be capable" capability.
-
-### 6. Linear OAuth identity
-
-Smithy authenticates to Linear as a service account via OAuth, not as the operator's personal API key. Commits, ticket comments, state transitions, and label edits audit-trail to a "Smithy" identity. Operators can revoke Smithy's OAuth grant without invalidating their own API key.
-
-Setup is one-time per Smithy installation: an admin runs `smithy auth setup` which walks through the OAuth flow and stores the refresh token in the operator's keychain. The orchestrator reads the access token at startup and refreshes as needed.
-
-The OAuth scope is constrained: read tickets and labels, comment, transition state, apply or remove a label whitelist (defaulting to the four labels in §11). No admin scopes, no team management, no integration management.
-
-GitHub identity follows the same pattern. Smithy installs as a GitHub App per target repo; the orchestrator authenticates as the installation. No personal `gh` token borrow in v2.
-
-### 7. SQLite history + model-summarized logs
-
-The dashboard gets a `/history` tab. Each row is a run, each click expands to a per-run detail view. Per-run detail shows:
-
-- Linear ticket ID + title
-- Runtime used (codex / claude-code / etc.)
-- Outcome (pass / fail / blocked / cancelled)
-- Token cost (input / output / total) per session within the run
-- Model-summarized log: a short summary of what the agent did, generated by a small post-run summarization call against the full session log
-- Link to the raw stream-json log file on disk
-
-The model-summarized log is the headline upgrade. Reading raw stream-json is operator-hostile; a one-paragraph "what happened" summary makes the dashboard usable.
-
-Persistence is SQLite via Ecto. Three tables: `runs` (one row per ticket attempt), `sessions` (one row per agent invocation, multiple per run when retries happen), `state_transitions` (one row per Linear state move). The `runs` table includes the cached workpad text and the run summary so the detail view does not need to re-summarize.
-
-### 8. Token cost tracking + rollups
-
-Every model call records its token usage and dollar cost. The dashboard surfaces:
-
-- Per-run cost (visible on the run row)
-- Per-day total (top-of-dashboard widget)
-- Per-tenant rollup (when multiple Linear teams are configured, one rollup per team)
-- Per-runtime cost share (codex vs claude vs other)
-
-Spend-cap alerts trigger when a run exceeds the per-run cap (configurable, defaults to $5) or when the daily rollup exceeds the daily cap (defaults to $50). Alerts are non-blocking by default; the harness keeps running but logs a warning. Strict mode (config flag) blocks new dispatches when the daily cap is hit.
-
-### 9. Max-retry circuit breaker
-
-After N attempts (configurable, defaults to 3), the orchestrator stops retrying and applies `harness-blocked`, transitions the ticket to `In Review`, and posts a comment summarizing the failure modes across attempts. Workspace and branch are preserved so a human can pick up where the harness left off.
-
-This closes the "no max-attempt count" footgun from the v1 pilot post-mortem.
-
-### 10. Bootstrap PR pattern
-
-For a target repo to be agent-ready, it needs `AGENTS.md` and (if Codex is used) `.codex/skills/`. v2 ships `smithy bootstrap <repo>` which clones the repo, generates the bootstrap files via a fresh agent session, and opens a PR with the bootstrap addition. Once that PR merges, the target repo is in the rotation.
-
-This formalizes the closed-loop bootstrap learning from the pilot post-mortem.
-
-### 11. Workpad reuse pattern
-
-Symphony's native pattern: a single per-ticket comment thread on Linear, owned by the harness, where progress notes accumulate throughout the ticket's lifecycle. Triage outcome, dispatch start, build progress checkpoints, review verdict, merge / handoff outcome, all in one thread.
-
-v2 keeps this pattern as-is. It's measurably better than the v1 approach of emitting separate comments per state transition. Reading one thread reads like a story; reading scattered comments reads like noise.
-
-Section ownership inside the workpad:
-
-- `### Plan`, `### Acceptance Criteria`, `### Validation`, `### Notes`: the build worker owns these. Reviewer reads but does not edit.
-- `### Adversarial Review`: the reviewer owns this. Each review pass appends a dated subsection with PASS / FAIL / BLOCKED verdict and structured findings. On a FAIL bounce-back to Todo, the build worker reads this section first before re-planning.
-- `### Confusions`: either agent may append.
-
-Append semantics, not overwrite. Each iteration adds a new dated subsection rather than replacing the prior one. The workpad becomes a chronological record of the ticket's full lifecycle, including reviewer pushback and rebuild responses. Operators reviewing a ticket post-merge can read the full back-and-forth in one place.
-
-### 12. Speccing-mode workflow (research preview, alpha-3+)
-
-Code review has objective oracles: compilers, tests, lint, security scanners. The reviewer's findings can be checked against deterministic ground truth. Spec review has none of that. The reviewer is another opinion-holder, and a single opinion against an ambiguous artifact compounds rather than cancels the original ambiguity. The risk modes for spec work are different from code: ambiguity (terms not pinned), assumption (premises not surfaced), and lack of context (constraints not loaded).
-
-Speccing-mode is a separate workflow shape that runs when the ticket carries a `mode:speccing` label (or the workflow file's `tracker.workflow_kind` is `speccing`). It replaces the single-build-then-single-review pipeline with a six-stage planner + panel + synthesizer loop. The shape borrows from the Salazar planner-features-loop pattern.
-
-1. **Question-first generation.** A planner agent reads the ticket body and produces an open-questions list: terms not pinned, assumptions not validated, constraints not loaded. The list lands in the workpad under `### Open Questions`. No spec content is generated yet.
-
-2. **Answer-resolution turn.** Each question gets answered, either by a human (default for high-stakes specs) or by a follow-up agent with web/repo read access (autonomous mode). Answers append under `### Resolved Questions` and become ground truth for the next stage. Unanswered questions block progression.
-
-3. **Spec generation.** A build agent (Codex or Claude per ticket label, same dispatch as code-mode per §1) writes the spec doc, treating the original ticket body as goal and the resolved questions as constraints. Output is one or more markdown files in the target repo at a configured spec-doc path.
-
-4. **Panel review.** N reviewer personas grade the spec independently, each with a different lens: architect-reviewer (acceptance-coverage, tradeoff defense, footgun docs), data-model-reviewer, devex-reviewer, migration-reviewer, security-reviewer, etc. Each writes its own `REVIEW.md` to a per-reviewer subdirectory of the workspace. Persona list is configured in the workflow file and dispatched via the persona-list mechanism in §4. Each persona MAY run on a different model family, multiplying cross-model coverage.
-
-5. **Synthesizer pass.** A synthesizer agent reads all panel `REVIEW.md` files plus the spec doc. Output is a `SYNTHESIS.md` with three sections: consensus findings (multiple reviewers agree, treat as authoritative), divergent findings (reviewers contradict each other, requires human resolution), and unaddressed scenarios (issues no reviewer raised that the synthesizer believes belong on the punch-list). The synthesis appends to the workpad under `### Synthesis`.
-
-6. **Decomposition.** The planner agent re-runs against the resolved spec and produces `features.json`: a structured artifact where each feature has acceptance criteria, scope notes, and a link back to the spec section it originated from. Optional follow-up: each feature gets filed as a separate Linear ticket, linked to the original speccing ticket as `related`. This is the closest thing to "did it compile" for spec work: if the spec can't be decomposed into actionable, scoped features, the spec failed regardless of how the prose reads.
-
-The Linear state machine is unchanged. Speccing-mode tickets pass through the same `Todo → In Progress → Adversarial Review → In Review → Done` flow. Fan-out happens within `In Progress` (planner, build agent) and `Adversarial Review` (panel + synthesizer). The orchestrator remains the sole state-transition authority.
-
-Why alpha-3+ and not earlier: speccing-mode requires both the persona-list dispatch (data model in alpha-1, length-N usage in alpha-3+) and a synthesizer agent (new in alpha-3). It also benefits from dual runtimes (alpha-1) so panel personas can run on different model families.
-
-What's explicitly out of scope: multi-turn debate between reviewers (each runs in a fresh session, same as code-mode), automated resolution of divergent findings (the synthesizer flags them, the human decides), and ambiguity-detection over arbitrary natural language beyond the planner's open-questions step. Speccing-mode reduces ambiguity, assumption, and context-gap risk; it does not eliminate them.
-
----
-
-## Linear state machine (v2)
-
+  triager:                      # optional; spec-quality gate
+    mode: triager
+    runtime: codex
+    persona: triager.md
+    mcp:
+      - linear-read
+    tier: low
 ```
-Backlog ─▶ Ready for Dev ─▶ In Progress ─▶ Adversarial Review ─▶ In Review ─▶ Done
-   ▲             │              │                │                  │
-   │             │ FLAG          │                │ FAIL             │ auto-merge
-   │             │ (needs-spec)  │                │                  │ (skip In Review)
-   │             ▼              │                ▼                  │
-   └────────────────────────────┴──────────────── Todo                │
-                                                                      │
-   harness-blocked ◀─── BLOCKED ◀───────── reviewer ─────────── max-retry circuit ◀─── (any state)
+
+**Three orthogonal axes:**
+
+- **`mode`** selects state-machine behavior. `builder` opens PR and transitions to Adversarial Review. `reviewer` reads diff + workpad, writes REVIEW.md, transitions to In Review (PASS) or Rework (FAIL). `triager` evaluates ticket quality, transitions to In Progress (PROCEED) or Backlog (FLAG with `needs-spec` label).
+- **`runtime`** selects the subprocess adapter. `codex` spawns `codex app-server`. `claude-code` spawns `claude --print --output-format stream-json --setting-sources project,local ...`. Adapters are interchangeable; mode logic doesn't care.
+- **`persona`** is a markdown file at `priv/personas/<name>.md` (Symphony-bundled) or `<repo>/.smithy/personas/<name>.md` (repo-local). YAML frontmatter declares `name`, `description`, intended `mode`, intended `runtime`, optional `model_hint`. Body is the prompt template with `{{var}}` placeholders.
+
+**Reviewer-as-list (forward-compatible for v2 panel review):**
+
+```yaml
+reviewers:                       # list form supported from day one
+  - mode: reviewer
+    runtime: claude-code
+    persona: reviewer.md
+  - mode: reviewer               # v2: panel review activates when N > 1
+    runtime: codex
+    persona: architect-reviewer.md
+```
+
+v1 only honors length-1. Length-N reviewer panels (per [v2-fork-spec §12 speccing-mode](history/2026-05-06-v2-fork-spec-original.md#12-speccing-mode-workflow-research-preview-alpha-3)) light up in v2 without a config migration.
+
+**MCP scoping:** the `mcp:` field whitelists named bundles. Symphony assembles a `--mcp-config <generated>.json` at spawn time and passes `--strict-mcp-config` so user-scope MCP servers don't leak in. Bundles ship in `priv/mcp_bundles/<name>.json` (`linear-read`, `github`, `playwright`, `context7`); repos can override at `<repo>/.smithy/mcp_bundles/<name>.json`.
+
+**Tier mapping:**
+- claude-code: `opus` → `claude-opus-4-7`, `sonnet` → `claude-sonnet-4-6`, `haiku` → `claude-haiku-4-5`
+- codex: `high` → `model_reasoning_effort=high`, `medium` → `medium`, `low` → `low`
+
+**Defaults match vanilla Symphony if `agents:` block is omitted.**
+
+```yaml
+# Implicit default if agents: omitted
+agents:
+  builder:
+    mode: builder
+    runtime: codex
+    persona: <embedded default body>
+    mcp: []
+    tier: medium
+  reviewer: null    # no Adversarial Review state, drop-in upstream behavior
 ```
 
 ---
 
-## Label vocabulary (v2)
+## Modes
 
-| Label | Applied by | Effect |
-|---|---|---|
-| `agent-ready` | Human | Queue gate. Without this, the harness ignores the ticket. |
-| `needs-spec` | Triage agent | Removes `agent-ready`, moves to Backlog. Ticket is parked until a human re-specs. |
-| `harness-blocked` | Reviewer or circuit breaker | Moves to `In Review`. Human picks up. |
-| `auto-merge` | Human (per ticket) | After review passes, merge and close without human gate. |
-| `runtime/codex` | Human (per ticket) | Force the Codex runtime for this ticket. |
-| `runtime/claude-code` | Human (per ticket) | Force the Claude Code runtime for this ticket. |
+### `mode: builder`
 
-If neither runtime label is present, the configured `default_runtime` runs. If both are present, the dispatcher errors and posts a comment asking the operator to pick one.
+The existing Symphony worker behavior. Reads the ticket, plans, implements, opens a PR, transitions to Adversarial Review (or directly to Human Review if no reviewer is configured).
+
+- Output artifact: `RESULT.md` at workspace root (optional; Symphony already uses the workpad as primary handoff).
+- State transitions: `Todo → In Progress → Adversarial Review` (or `→ Human Review` if no reviewer).
+- Owns workpad sections: `### Plan`, `### Acceptance Criteria`, `### Validation`, `### Notes`.
+
+### `mode: reviewer`
+
+Ported from Anvil. Reads the PR diff + workpad, writes `REVIEW.md` with structured findings, never edits code.
+
+**REVIEW.md contract:**
+
+```markdown
+---
+status: pass | fail
+findings:
+  - finding: "lens-prefix: description"
+    grade: blocker | polish | future
+notes: |
+  Longer prose context. Optional.
+---
+```
+
+**Validation rules:**
+- `status: fail` requires at least one `blocker` grade. Polish-only or future-only findings keep `status: pass`.
+- Unknown grades reject the REVIEW.md as malformed.
+- Missing or malformed REVIEW.md results in BLOCKED; ticket stays in Adversarial Review with a workpad note for the operator.
+
+**State transitions:**
+- PASS → `Human Review` (or `Done` if `auto-merge` label is set per [v2-fork-spec §5](history/2026-05-06-v2-fork-spec-original.md))
+- FAIL → `Rework` with findings appended to workpad under dated `### Adversarial Review` subsection
+- BLOCKED → `harness-blocked` label, stays in Adversarial Review, operator triages
+
+**Tool denylist:** reviewer agent receives `--disallowedTools mcp__linear__save_* mcp__linear__create_* mcp__linear__delete_*` (Claude Code) or equivalent (Codex `disabled_tools` config). Linear writes always come from the orchestrator.
+
+**Workspace:** v1 uses warm workspace (the builder's workspace). v2 may switch to cold-clone review (per [v2-fork-spec §4](history/2026-05-06-v2-fork-spec-original.md)).
+
+**Personas ship in `priv/personas/`:**
+- `reviewer.md` (general code reviewer; default for `mode: reviewer`)
+- `architect-reviewer.md` (spec/design documents, Opus tier)
+- `data-model-reviewer.md` (schema audits, Opus)
+- `devex-reviewer.md` (operator UX audits, Opus)
+- `migration-reviewer.md` (cutover audits, Opus)
+
+### `mode: triager`
+
+The spec-quality gate. Runs front-of-queue on tickets carrying `agent-ready`. Evaluates the four questions from [v2-fork-spec §3](history/2026-05-06-v2-fork-spec-original.md):
+
+1. **Where**: file/module/feature unambiguously identified?
+2. **What**: clear delta requested?
+3. **Acceptance**: success criterion testable?
+4. **Ambiguity**: any punt phrases, missing decisions, multiple plausible implementations?
+
+**Output:** `TRIAGE.md` at workspace root:
+
+```markdown
+---
+decision: proceed | flag
+reasons:
+  - "Where: ✓ identifies lib/foo/bar.ex"
+  - "What: ✓ adds X behavior"
+  - "Acceptance: ✗ no testable criterion"
+gap_comment: |
+  This ticket cannot be executed autonomously in its current form. Specific gaps:
+  - <bullet>
+  - <bullet>
+  To re-queue: address the gaps above, remove `needs-spec`, add `agent-ready`,
+  and move to Ready for Dev.
+---
+```
+
+**State transitions:**
+- PROCEED → `In Progress`, builder dispatches immediately
+- FLAG → applies `needs-spec` label, removes `agent-ready`, moves to `Backlog`, posts `gap_comment` to workpad
+
+Triager is a one-turn invocation. Proportionality clause in the persona: trivial tickets (typos, version bumps) PROCEED on title alone.
+
+### Future modes (v2+, defined for forward compatibility, not implemented in v1)
+
+- `mode: mediator` — Opus arbiter after N failed review cycles (PER-41 reference; see [edge-cases.md §1](edge-cases.md#1-buildreview-oscillation))
+- `mode: synthesizer` — aggregates panel review findings into SYNTHESIS.md (v2 speccing-mode)
+- `mode: planner` — decomposes a master ticket into child issues (v2 master cascade)
 
 ---
 
-## Trust model + sandbox
+## Runtimes
 
-- **Merge gate:** label-driven. `auto-merge` skips human review; absence keeps the human gate.
-- **Auth (Linear):** OAuth identity for Smithy as a service account. No personal API key in production.
-- **Auth (GitHub):** GitHub App per target repo. No `gh` token borrow.
-- **Worker isolation:** Codex runs in a custom seatbelt profile that allows `.git/` writes and network only. The full-access mode used in the v1 pilot is not the v2 default.
-- **Tool denylist:** Linear API write tools are stripped from each spawned worker. Workers see Linear via MCP read-only. State moves come from the orchestrator.
-- **Network:** outbound HTTPS only. Localhost-bound LiveView dashboard.
-- **Operator action required:** OAuth setup (one-time), label application (per ticket), human approval at `In Review` unless `auto-merge` is set.
+### Codex (unchanged from upstream)
 
----
+Symphony's existing Codex AppServer integration. Spawns `codex app-server` via JSON-RPC over stdio. Multi-turn within a single port. Per-tier config via `-c model_reasoning_effort=<high|medium|low>`.
 
-## Phase build order
+**Standard flags (per smithy-v1 PER-46):**
 
-Each phase depends on the previous. Phases below are spec-level, not Linear-ticket level. The actual Linear ticket queue should map roughly 1-to-1 with the bullets inside each phase.
+```
+codex \
+  -c mcp_servers.linear.url=<linear-mcp-url> \
+  -c mcp_servers.linear.disabled_tools=[...] \
+  -c model_reasoning_effort=<tier> \
+  exec --ignore-user-config
+```
 
-### Phase 0: Fork prep
+`--ignore-user-config` drops `~/.codex/config.toml`. CODEX_HOME auth persists. Linear MCP server re-added inline.
 
-- Clone `openai/symphony` as the base of the new public Smithy v2 codebase.
-- Add NOTICE file with Apache-2.0 attribution.
-- Strip OpenAI-specific demo paths and any branding that isn't Smithy's to keep.
-- Update Symphony's `mix.exs` package metadata to `:smithy`.
-- Sweep for personal-leak content (paths, customer names, tenant UUIDs).
-- Tag base commit as `v2.0.0-alpha-fork-base`.
+### Claude Code (new)
 
-### Phase 1: Configuration schema and label vocabulary
+Validated via spike on 2026-05-11. Spawns `claude --print --output-format stream-json` per turn. Multi-turn via `--continue <session_id>`.
 
-- Extend Symphony's config schema with the v2 label vocabulary.
-- Implement label-driven dispatch (queue gate, runtime selection, auto-merge gate).
-- Migrate the v1 pilot's `tracker.labels` filter into the formal schema.
+**Standard flags (per smithy-v1 PER-44):**
 
-### Phase 2: Spec quality gate
+```
+claude -p \
+  --setting-sources project,local \
+  --dangerously-skip-permissions \
+  --model claude-{opus-4-7|sonnet-4-6|haiku-4-5} \
+  --disallowedTools "<space-separated denylist>" \
+  --strict-mcp-config \
+  --mcp-config <symphony-generated-mcp.json> \
+  --output-format stream-json \
+  --verbose
+```
 
-- Author the triage prompt (the four-question rubric).
-- Wire triage as a step before dispatch in `WORKFLOW.md`.
-- Add the FLAG action: apply `needs-spec`, remove `agent-ready`, move to Backlog, post structured comment.
-- Test against a sample of underspec'd tickets.
+`--setting-sources project,local` drops user-scope settings (CLAUDE.md, SessionStart hooks). OAuth and keychain auth persist because they live outside settings. `--strict-mcp-config` plus the generated MCP file restricts MCP to the workflow's declared bundles.
 
-### Phase 3: Dual runtime dispatch
+**Event parsing:** `Smithy.Runtime.ClaudeCode.EventParser` (already implemented in spike). Pure-function JSONL parser, normalizes to typed Elixir event tuples.
 
-- Add Claude Code runtime alongside the existing Codex runtime.
-- Implement runtime selection from labels.
-- Author the Claude Code worker prompt and disallowed-tools list.
-- Verify both runtimes produce comparable handoff artifacts (`RESULT.md` shape).
+**Argv construction:** `Smithy.Runtime.ClaudeCode.Argv` (already implemented in spike). Builds the flag list with tier/disallowed-tools/session-id/budget/etc. as opts.
 
-### Phase 4: Adversarial review with cross-model swap
-
-- Wire the Adversarial Review Linear state.
-- Implement reviewer dispatch on the In Progress to Adversarial Review transition.
-- Configure the cross-model pairing (Codex builds → Claude reviews; Claude builds → Codex reviews).
-- Author the reviewer prompt and `REVIEW.md` schema.
-- Test retroactively on the v1 pilot's PR.
-
-### Phase 5: Persistence + history dashboard
-
-- Add Ecto repo, migrations, schemas (`runs`, `sessions`, `state_transitions`).
-- Hook orchestrator events into persistence.
-- Add the `/history` LiveView page.
-- Add the per-run summary call at run end.
-- Cache run summary on the `runs` row to avoid re-summarization.
-
-### Phase 6: Cost tracking + rollups
-
-- Capture token usage on every model call.
-- Compute per-run, per-day, per-tenant, per-runtime rollups.
-- Add the dashboard widgets.
-- Implement spend-cap alerts (warn mode in v2; strict mode opt-in).
-
-### Phase 7: OAuth identity
-
-- Build the OAuth flow for Linear (`smithy auth setup`).
-- Build the GitHub App installation flow.
-- Migrate the orchestrator to read OAuth tokens from the keychain.
-- Document the per-installation setup process.
-
-### Phase 8: Circuit breaker + bootstrap pattern
-
-- Add max-retry circuit breaker.
-- Add `harness-blocked` escalation path.
-- Build `smithy bootstrap <repo>` command.
-- Document the closed-loop bootstrap pattern.
-
-### Phase 9: Sandbox hardening
-
-- Author the custom Codex seatbelt profile (allow `.git/` writes + network).
-- Test against the v1 pilot scenario to confirm builds still work.
-- Make the custom seatbelt the v2 default; full-access becomes opt-in.
-
-### Phase 10: Public release
-
-- README, LICENSE, NOTICE, CONTRIBUTING, CODE_OF_CONDUCT.
-- Hero image (already generated; see `assets/hero.png`).
-- Quickstart walkthrough.
-- Migration guide from vanilla Symphony.
-- Tag `v2.0.0`.
+**Port management:** TODO. Mirror `Smithy.Codex.AppServer` shape. Single-shot per turn with `--continue` between turns.
 
 ---
 
-## Out of scope for v2 (v3 candidates)
+## State machine
 
-- Reviewer-model rotation (rotate among multiple model families instead of a fixed pair).
-- Cross-tracker support (Jira, GitHub Issues, Asana). Linear-only in v2.
-- Public or remote-access dashboard. Localhost-bound in v2.
-- Multi-operator support (concurrent operators on the same Smithy installation).
-- Hosted Smithy (managed-Smithy SaaS).
-- Cross-repo coordination (one harness instance per target repo).
-- Cost budgets per ticket (currently per-run / per-day caps; per-ticket spend ceilings deferred).
+Symphony's existing state machine with the Adversarial Review slot already added in alpha-0:
+
+```
+Backlog → Todo → (triager?) → In Progress → (reviewer?) → Adversarial Review
+                                                        → Human Review
+                                                        → Merging → Done
+                                                        ↘ Rework → In Progress (loop)
+```
+
+Smithy v2.1 adds:
+
+- **Triager pass before In Progress.** If `agents.triager` is configured, builder doesn't dispatch until triager returns PROCEED. FLAG'd tickets go to `Backlog` with `needs-spec` label.
+- **Reviewer in Adversarial Review.** If `agents.reviewer` is configured (or `agents.reviewers` list is non-empty), the builder transitions to `Adversarial Review` on PR open instead of `Human Review`. Reviewer transitions onward based on REVIEW.md.
+- **Auto-merge bypass.** Ticket with `auto-merge` label and PASS review skips `Human Review`, goes directly to `Merging` per [v2-fork-spec §5](history/2026-05-06-v2-fork-spec-original.md).
+- **Circuit breaker.** After N retries (default 3), `harness-blocked` label applied, ticket moves to `Human Review` with multi-attempt summary in workpad. See [edge-cases.md §1](edge-cases.md#1-buildreview-oscillation).
+
+`Tracker.active_states` in WORKFLOW.md is extended to include `Adversarial Review` and `Rework` by default. `Backlog`, `Human Review`, `Done` etc. remain outside the active set.
+
+---
+
+## Smithy wrapper
+
+The thin supervisor. Two implementation options on the table:
+
+- **Elixir escript** (one binary, ships in the same monorepo, shares the Symphony OTP runtime model). Recommended for v1; faster to iterate, no language context switch.
+- **Rust binary** (faster startup, smaller, matches smithy-v1's shape). v2 candidate if performance becomes a concern.
+
+v1 ships Elixir. The CLI surface is small enough that perf isn't the bottleneck.
+
+### Repo registry
+
+`~/.smithy/config.toml`:
+
+```toml
+default_runtime = "codex"
+default_workflow = "WORKFLOW.md"
+
+[[repos]]
+slug = "smithy"
+path = "/Users/shawnpetros/projects/smithy"
+workflow = "WORKFLOW.md"      # path relative to repo root
+port = 4001                   # auto-assigned at add-repo time
+
+[[repos]]
+slug = "substrate"
+path = "/Users/shawnpetros/projects/substrate"
+workflow = "WORKFLOW.md"
+port = 4002
+
+[[repos]]
+slug = "content-pipeline"
+path = "/Users/shawnpetros/projects/content-pipeline"
+workflow = "WORKFLOW.md"
+port = 4003
+```
+
+### launchd plist generation
+
+`smithy add-repo <slug> <path>` writes a plist to `~/Library/LaunchAgents/com.shawnpetros.smithy.<slug>.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "...">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.shawnpetros.smithy.smithy</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/symphony</string>
+    <string>--logs-root</string>
+    <string>~/.smithy/logs/smithy</string>
+    <string>--port</string>
+    <string>4001</string>
+    <string>~/projects/smithy/WORKFLOW.md</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>~/.smithy/logs/smithy/stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>~/.smithy/logs/smithy/stderr.log</string>
+</dict>
+</plist>
+```
+
+`KeepAlive.SuccessfulExit=false` plus Symphony's exit code 75 for self-update means the supervisor brings the daemon back automatically after a self-update merge.
+
+systemd unit template ships for Linux. Same shape.
+
+### Aggregate TUI
+
+`smithy status` queries each registered Symphony's HTTP API (`/api/v1/state` or equivalent) and renders an aggregate terminal block. Layout draws from Symphony's existing single-repo TUI:
+
+```
+SMITHY STATUS
+Repos: 3 active / 3 registered
+Total Agents: 27/100   Throughput: 1,234,567 tps   Uptime: 2d 14h 32m
+Tokens (all repos): in 142M  |  out 8.3M  |  total 150M
+
+──────────────────────────────────────────────────────────────────────────
+[smithy]  19/50 agents  658k tps  http://localhost:4001
+  MT-725  Todo         1m 19s  1,442,520 tok  command output streaming
+  MT-726  In Progress  1m 19s  1,664,641 tok  reasoning rs_08aab3ca0
+  ...
+
+[substrate]  6/30 agents  421k tps  http://localhost:4002
+  PER-99  In Progress  3m 42s  892,317 tok  turn diff updated
+  ...
+
+[content-pipeline]  2/20 agents  155k tps  http://localhost:4003
+  CON-12  Adversarial Review  0m 45s  421,889 tok  reviewer started
+  ...
+──────────────────────────────────────────────────────────────────────────
+
+Backoff queue: 0 entries across all repos
+Next refresh: 1s
+```
+
+Single source of polling: Smithy's CLI process queries each Symphony's HTTP API every refresh_interval; renders in foreground. Themed aliases (`smithy bellows`, `smithy forge`) print the same view.
+
+### Browser dashboard
+
+`smithy dashboard <slug>` runs `open http://localhost:<port>/` on macOS (`xdg-open` on Linux), pointing at that repo's Symphony LiveView.
+
+`smithy dashboard` (no slug) opens an aggregate web view served by Smithy itself. v1 ships this as a simple HTML page that iframes the per-repo LiveViews in a grid. v2 polish becomes a native unified dashboard.
+
+### Self-update flow
+
+Per [edge-cases.md §3](edge-cases.md#3-self-update-mid-flight). Single-task mode while a `smithy:self-update` ticket holds the queue; drain other workers to safe checkpoints; merge the PR; rebuild (`mix compile`); daemon exits 75; launchd respawns; new daemon hydrates from Linear state and transitions the self-update ticket to Human Review.
+
+If compile fails post-merge: `harness-blocked` label, no respawn, heartbeat dashboard alerts operator. Recovery doc at `docs/operations/self-update-recovery.md`.
+
+---
+
+## Universal AGENTS.md template
+
+Both Codex and Claude Code read project-root `AGENTS.md`. Symphony's `smithy add-repo` (or future `smithy bootstrap`) ships a minimal template to the target repo:
+
+```markdown
+# AGENTS.md (Smithy-managed repo)
+
+This repo is operated by Smithy v2.1. Read this file before any work.
+
+## Workpad
+
+Every Linear ticket has a `## Codex Workpad` comment (Symphony's convention,
+inherited from upstream). All progress notes, plans, validation, review
+findings, and confusions go in that single comment. Do not post separate
+update comments.
+
+Workpad sections:
+- `### Plan` (builder owns)
+- `### Acceptance Criteria` (builder owns)
+- `### Validation` (builder owns)
+- `### Notes` (builder owns)
+- `### Adversarial Review` (reviewer appends, dated subsections)
+- `### Confusions` (any agent may append)
+
+## Handoff artifacts
+
+- Builder mode: write `RESULT.md` at workspace root on exit (optional;
+  workpad is primary).
+- Reviewer mode: write `REVIEW.md` at workspace root on exit (required).
+  Schema: `status: pass|fail`, `findings: [{finding, grade}]`,
+  `notes: |`. Grades: blocker | polish | future. `status: fail` requires
+  at least one `blocker`.
+- Triager mode: write `TRIAGE.md` at workspace root on exit.
+  Schema: `decision: proceed|flag`, `reasons: []`, `gap_comment: |`.
+
+## Linear state transitions
+
+Workers DO NOT transition Linear state. The orchestrator owns all state
+moves. Workers communicate intent via the handoff artifacts above.
+
+## Tool restrictions
+
+Workers operate with `--disallowedTools` filtering on Linear write tools.
+Reviewer mode additionally cannot edit files outside `REVIEW.md`. Builder
+mode can edit any file in the workspace.
+
+## Validation
+
+Run repo-specific test commands before declaring work done. The workflow
+config declares the validation commands (or they're inferred from
+mix.exs / Cargo.toml / package.json conventions).
+
+## Branch and commit conventions
+
+- Branch: `smithy/<ticket-id>-<short-slug>`
+- Commit: imperative present tense, body explains why, trailer line
+  `Co-Authored-By: Smithy <noreply@smithy.local>` (post-OAuth identity
+  this becomes the service account).
+```
+
+Each repo can extend AGENTS.md with repo-specific rules (test commands, layering conventions, layering invariants). The Smithy-managed prefix above stays as the universal nudge.
+
+---
+
+## What ships in v1 (the "tomorrow morning" cut)
+
+In dependency order. Each block is a separate commit; the full set ships as `v2.0.0-alpha-1`.
+
+### Block A: Symphony fork core changes
+
+1. **Schema extension.** Add `Agents` embedded Ecto schema (`config/schema.ex`) with `mode`, `runtime`, `persona`, `mcp`, `tier`. Add `reviewers` as a `embeds_many` list for forward compat. Update `Tracker.active_states` default to include `Adversarial Review`, `Rework`.
+2. **Workflow.md frontmatter parsing.** `lib/symphony_elixir/workflow.ex` accepts the new `agents:` block. Fallback defaults preserve vanilla Symphony behavior.
+3. **Persona module.** `lib/symphony_elixir/personas/persona.ex` + `personas/loader.ex`. Markdown + YAML frontmatter + `{{var}}` rendering. Library at `priv/personas/`.
+4. **MCP bundle module.** `lib/symphony_elixir/mcp/bundle.ex`. Loads named bundles, generates `--mcp-config` JSON. Library at `priv/mcp_bundles/`.
+
+### Block B: Runtime adapters
+
+5. **Codex adapter formalization.** Existing `lib/symphony_elixir/codex/app_server.ex` gets a sibling `lib/symphony_elixir/runtime/codex.ex` that's the formal Runtime behaviour implementation. Existing call sites updated to call through the behaviour.
+6. **ClaudeCode adapter implementation.** `lib/symphony_elixir/runtime/claude_code/app_server.ex` (port management; mirrors Codex's pattern). EventParser and Argv from the spike are already in place.
+7. **Runtime behaviour.** `lib/symphony_elixir/runtime.ex` defines the behaviour: `start_session`, `run_turn`, `stop_session`. Both adapters implement it.
+
+### Block C: Mode dispatch
+
+8. **Mode dispatch refactor.** `Orchestrator.dispatch_issue/3` selects the right agent config (builder, optional triager, optional reviewer) and routes accordingly. `AgentRunner.run/3` becomes mode-aware.
+9. **Reviewer mode.** `lib/symphony_elixir/modes/reviewer.ex`. Reads diff, spawns reviewer agent with `mode: reviewer` persona, parses `REVIEW.md`, transitions Linear state. Port of Anvil's `src/review.rs`.
+10. **Triager mode.** `lib/symphony_elixir/modes/triager.ex`. Spawns triager agent, parses `TRIAGE.md`, transitions state.
+11. **REVIEW.md parser.** `lib/symphony_elixir/handoff/review.ex`. Validates schema, grades, status invariants.
+12. **TRIAGE.md parser.** `lib/symphony_elixir/handoff/triage.ex`. Validates schema, decisions.
+13. **Workpad section management.** Extract `lib/symphony_elixir/workpad.ex` from existing inline Linear adapter logic. Owns section conventions (Plan, Acceptance Criteria, Adversarial Review, Confusions).
+
+### Block D: Smithy wrapper
+
+14. **Smithy CLI binary.** New monorepo subdirectory `wrapper/` (Elixir escript). Subcommands: `add-repo`, `remove-repo`, `daemon {start|stop|restart}`, `status`, `dashboard`, `logs`, `bellows`, `forge`.
+15. **Repo registry.** `wrapper/config.ex` reads/writes `~/.smithy/config.toml`.
+16. **launchd/systemd plist generation.** `wrapper/supervisor.ex`. Templates in `wrapper/priv/templates/`.
+17. **Aggregate TUI.** `wrapper/tui.ex`. Queries each Symphony's HTTP API on a tick, renders unified ANSI block.
+18. **Browser dashboard launcher.** `wrapper/dashboard.ex`. Shells out to `open` / `xdg-open`.
+19. **Heartbeat collation.** Symphony exposes `/api/v1/state` already. Smithy reads from each registered repo's port.
+
+### Block E: Self-update + AGENTS.md
+
+20. **`smithy:self-update` label handling.** Per [edge-cases.md §3](edge-cases.md#3-self-update-mid-flight). Single-task mode + drain + rebuild + exit 75. Smithy ↔ Symphony coordination via heartbeat file in `~/.smithy/state/`.
+21. **AGENTS.md template.** Ships in `priv/templates/AGENTS.md`. `smithy add-repo` writes it to the target repo if absent.
+22. **Workflow template library.** `priv/templates/workflows/cross-model-codex-claude.yaml`, `same-model-cheap.yaml`, etc.
+
+### Block F: Documentation + alpha-1 tag
+
+23. **README rewrite.** Reflect v2.1 architecture, install steps, daemon mode, quickstart.
+24. **Migration guide.** `docs/migrating-from-symphony-fork-v0.md` for users on the alpha-0 fork.
+25. **Tag `v2.0.0-alpha-1`** on the `main` branch after PR merges.
+
+---
+
+## What's deferred (v2 polish, v3 ambitions)
+
+Tracked here so future-us doesn't re-debate scope.
+
+### v2 polish (weeks 6-12 after v1)
+
+- Unified cross-repo browser dashboard (replaces the iframe grid)
+- SQLite run history per Symphony instance (Phases 5 of [original v2 spec](history/2026-05-06-v2-fork-spec-original.md))
+- Streaming worker stdout to dashboard via Phoenix PubSub
+- Cost rollups: per-run, per-day, per-tenant, per-runtime
+- Mediator mode (PER-41) after N failed review cycles
+- BlockedBy dependency gating (PER-42 port from smithy-v1)
+- Per-role model tier overrides (PER-36 port from smithy-v1)
+- GitHub App identity (commits as service account, not operator)
+- Linear OAuth identity (Phase 7 of [original v2 spec](history/2026-05-06-v2-fork-spec-original.md))
+
+### v3 ambitions
+
+- AI-summarized run logs ("complexity analysis" per Symphony blog)
+- PR walkthrough video generation (per Symphony blog)
+- Reviewer panel: length-N reviewer list, synthesizer aggregates findings (speccing-mode per [original v2 spec §12](history/2026-05-06-v2-fork-spec-original.md#12-speccing-mode-workflow-research-preview-alpha-3))
+- Multi-tracker support (GitHub Issues, Jira) inspired by Contrabass
+- Phased pipelines (plan → execute → verify) inspired by Contrabass
+- Completion ETA estimation
+- Hosted-Smithy as a managed SaaS
+
+---
+
+## Edge cases reference
+
+See `v2/edge-cases.md` for full enumeration. 12 failure modes spec'd with proposed behavior:
+
+1. Build/review oscillation (mediator escalation, findings dedup, max-retry circuit breaker)
+2. Test flakes during reviewer validation
+3. Self-update mid-flight
+4. Cross-repo single ticket (out of scope for v1)
+5. PR feedback during Human Review
+6. Token cost runaway (`--max-budget-usd` cap, per-turn watchdog)
+7. Network failures (retry-with-backoff, Linear-as-truth)
+8. Workspace corruption
+9. Reviewer can't decide (graded findings contract is the discipline)
+10. Concurrent worker conflicts
+11. max_turns exhausted without finishing
+12. Linear OAuth token rotation (v2 scope)
+
+Hard requirements (ship with v1): items 1, 3, 4, 5, 6, 7, 9, 11.
 
 ---
 
 ## Open questions
 
-1. **OAuth client registration.** Public Smithy needs a published OAuth client ID for users to register against. Where does that live? A single Smithy-org client (operators register their own Linear workspace against it) or per-installation (each operator registers their own OAuth client). Single-org is simpler for users; per-installation is simpler for the maintainer. Defaulting to per-installation in v2; revisit if user demand surfaces.
-2. **Custom seatbelt profile coverage.** The v1 pilot ran in `dangerFullAccess` mode. The v2 default seatbelt allows `.git/` writes and outbound network. Need to test against the v1 pilot scenario and confirm the build still passes. If gaps surface, document them and ship `dangerFullAccess` as a fallback config flag.
-3. **Workpad reuse on retries.** When a ticket retries (FAIL back to Todo), does the workpad comment reset or continue accumulating? Continuing reads as a coherent story; resetting separates attempts. Defaulting to continuing.
-4. **Per-tenant rollup definition.** What counts as a "tenant" when one Smithy installation drives multiple Linear teams? Currently defined as one rollup per Linear team. Could also be per-repo or per-label-group.
-5. **Auto-merge revert path.** If `auto-merge` lands a bad change, how does the operator find out and roll it back? v2 ships a Slack/email alert on every auto-merged PR, with a one-line summary and the PR URL. v3 may add automated revert via a `revert` label.
+1. **Smithy wrapper in Elixir or Rust?** v1 ships Elixir (in-monorepo escript). Revisit if perf is a problem.
+2. **Aggregate dashboard tech.** v1 ships iframe grid; v2 builds native unified dashboard. What framework? Phoenix LiveView (continuity, easy) or Next.js (matches your other tooling). Defer to v2.
+3. **Codex Claude Code parity for `--max-budget-usd`-style cost cap.** Codex side needs per-turn token-count watchdog since no built-in cap exists. Implement in v1 or defer? Lean defer; document the asymmetry.
+4. **Multi-turn for Claude Code: `--continue <session_id>` per turn, or streaming-input port?** Lean `--continue` per turn. Each turn is one spawn. Simpler.
 
 ---
 
 ## What this is NOT
 
-- Not a from-scratch reimplementation. Smithy v2 is a Symphony fork with layered opinions.
-- Not a workflow product on its own. Smithy is the harness layer. Higher-level workflow logic (multi-stage pipelines, routing rules, customer-specific orchestration) is the operator's responsibility and lives outside this repo.
-- Not a hosted product. v2 is a local-install OSS tool. Hosted-Smithy is a v3-or-later question.
-- Not a one-shot port. v2 is built phase by phase, with each phase shippable on its own. The phase ordering above is the recommended sequence; phases can ship in different orders if dependencies permit.
+- NOT a re-implementation of Symphony. v2.1 is a fork-plus-opinions, with the opinion layer mostly INSIDE the Symphony fork rather than above it.
+- NOT a daemon orchestrator. Smithy is a thin CLI wrapper plus launchd plists. The daemons ARE the Symphony instances.
+- NOT a SaaS. v1 is local-install, single-operator, multi-repo.
+- NOT a cross-repo task coordinator. Each ticket maps to one repo. Cross-repo workflows are v3.
+- NOT a re-implementation of Anvil. Anvil's logic ports inward; Anvil retires as a separate component for Smithy users (it can keep existing for vanilla Symphony users).
