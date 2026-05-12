@@ -25,6 +25,11 @@ defmodule SymphonyElixir.ExtensionsTest do
       {:ok, issue_ids}
     end
 
+    def fetch_issues_with_labels(labels) do
+      send(self(), {:fetch_issues_with_labels_called, labels})
+      {:ok, labels}
+    end
+
     def graphql(query, variables) do
       send(self(), {:graphql_called, query, variables})
 
@@ -183,15 +188,35 @@ defmodule SymphonyElixir.ExtensionsTest do
 
   test "tracker delegates to memory and linear adapters" do
     issue = %Issue{id: "issue-1", identifier: "MT-1", state: "In Progress"}
-    Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue, %{id: "ignored"}])
+
+    halted_issue = %Issue{
+      id: "issue-2",
+      identifier: "MT-2",
+      state: "In Progress",
+      labels: ["smithy:halt"]
+    }
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [
+      issue,
+      halted_issue,
+      %{id: "ignored"}
+    ])
+
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
 
     assert Config.settings!().tracker.kind == "memory"
     assert SymphonyElixir.Tracker.adapter() == Memory
-    assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_candidate_issues()
-    assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_issues_by_states([" in progress ", 42])
+    assert {:ok, [^issue, ^halted_issue]} = SymphonyElixir.Tracker.fetch_candidate_issues()
+    assert {:ok, [^issue, ^halted_issue]} =
+             SymphonyElixir.Tracker.fetch_issues_by_states([" in progress ", 42])
+
     assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_issue_states_by_ids(["issue-1"])
+
+    assert {:ok, [^halted_issue]} =
+             SymphonyElixir.Tracker.fetch_issues_with_labels(["smithy:halt", "smithy:halt-all"])
+
+    assert {:ok, []} = SymphonyElixir.Tracker.fetch_issues_with_labels(["nope"])
     assert :ok = SymphonyElixir.Tracker.create_comment("issue-1", "comment")
     assert :ok = SymphonyElixir.Tracker.update_issue_state("issue-1", "Done")
     assert_receive {:memory_tracker_comment, "issue-1", "comment"}
@@ -216,6 +241,9 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert {:ok, ["issue-1"]} = Adapter.fetch_issue_states_by_ids(["issue-1"])
     assert_receive {:fetch_issue_states_by_ids_called, ["issue-1"]}
+
+    assert {:ok, ["smithy:halt"]} = Adapter.fetch_issues_with_labels(["smithy:halt"])
+    assert_receive {:fetch_issues_with_labels_called, ["smithy:halt"]}
 
     Process.put(
       {FakeLinearClient, :graphql_result},

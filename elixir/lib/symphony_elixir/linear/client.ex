@@ -205,6 +205,68 @@ defmodule SymphonyElixir.Linear.Client do
     end
   end
 
+  @label_lookup_query """
+  query SymphonyLabelLookup($projectSlug: String!, $labelNames: [String!]!, $first: Int!) {
+    issues(filter: {project: {slugId: {eq: $projectSlug}}, labels: {some: {name: {in: $labelNames}}}}, first: $first) {
+      nodes {
+        id
+        identifier
+        state {
+          name
+        }
+        labels {
+          nodes {
+            name
+          }
+        }
+      }
+    }
+  }
+  """
+
+  @spec fetch_issues_with_labels([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
+  def fetch_issues_with_labels(label_names) when is_list(label_names) do
+    case Enum.reject(label_names, &(is_nil(&1) or &1 == "")) do
+      [] ->
+        {:ok, []}
+
+      labels ->
+        tracker = Config.settings!().tracker
+        project_slug = tracker.project_slug
+
+        cond do
+          is_nil(tracker.api_key) ->
+            {:error, :missing_linear_api_token}
+
+          is_nil(project_slug) ->
+            {:error, :missing_linear_project_slug}
+
+          true ->
+            variables = %{projectSlug: project_slug, labelNames: labels, first: 50}
+
+            with {:ok, response} <- graphql(@label_lookup_query, variables) do
+              nodes = get_in(response, ["data", "issues", "nodes"]) || []
+
+              issues =
+                Enum.map(nodes, fn node ->
+                  %Issue{
+                    id: node["id"],
+                    identifier: node["identifier"],
+                    state: get_in(node, ["state", "name"]),
+                    labels:
+                      node
+                      |> get_in(["labels", "nodes"])
+                      |> List.wrap()
+                      |> Enum.map(& &1["name"])
+                  }
+                end)
+
+              {:ok, issues}
+            end
+        end
+    end
+  end
+
   @spec graphql(String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
   def graphql(query, variables \\ %{}, opts \\ [])
       when is_binary(query) and is_map(variables) and is_list(opts) do
