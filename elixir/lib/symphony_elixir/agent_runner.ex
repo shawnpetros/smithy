@@ -1,11 +1,25 @@
 defmodule SymphonyElixir.AgentRunner do
   @moduledoc """
-  Executes a single Linear issue in its workspace with Codex.
+  Executes a single Linear issue in its workspace.
+
+  Mode dispatch lives here (sub-pass B):
+
+    * `:builder`  -> existing Codex flow (runtime selection from
+      `agent_config.runtime` is sub-pass C scope; v1 always uses Codex).
+    * `:reviewer` -> `SymphonyElixir.Modes.Reviewer.run/4` then transition
+      Linear state based on the outcome (PASS -> `Human Review` or `Merging`,
+      FAIL -> `Rework`, BLOCKED -> stays in `Adversarial Review` with the
+      `harness-blocked` label).
+    * `:triager`  -> `SymphonyElixir.Modes.Triager.run/4` then transition
+      Linear state (PROCEED -> `In Progress`, FLAG -> `Backlog` with
+      `needs-spec` + `-agent-ready`, BLOCKED -> stays in `Todo` with
+      `harness-blocked`).
   """
 
   require Logger
   alias SymphonyElixir.Codex.AppServer
-  alias SymphonyElixir.{Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
+  alias SymphonyElixir.{Config, Linear.Issue, Modes, PromptBuilder, Tracker, Workpad, Workspace}
+  alias SymphonyElixir.Handoff.Review
 
   @type worker_host :: String.t() | nil
 
@@ -17,15 +31,21 @@ defmodule SymphonyElixir.AgentRunner do
     mode = Keyword.get(opts, :mode, :builder)
     agent_config = Keyword.get(opts, :agent_config)
 
-    # Sub-pass A: always go through the existing builder path.
-    # Sub-pass B will branch on mode here:
-    #   :builder  -> existing flow (possibly with runtime adapter selection from agent_config.runtime)
-    #   :reviewer -> Modes.Reviewer.run/4 then return outcome
-    #   :triager  -> Modes.Triager.run/4 then return outcome
-    _ = {mode, agent_config}
-
     Logger.info("Starting agent run for #{issue_context(issue)} mode=#{mode} worker_host=#{worker_host_for_log(worker_host)}")
 
+    case mode do
+      :builder ->
+        run_builder_mode(issue, codex_update_recipient, opts, worker_host)
+
+      :reviewer ->
+        run_reviewer_mode(issue, agent_config, opts, worker_host)
+
+      :triager ->
+        run_triager_mode(issue, agent_config, opts, worker_host)
+    end
+  end
+
+  defp run_builder_mode(issue, codex_update_recipient, opts, worker_host) do
     case run_on_worker_host(issue, codex_update_recipient, opts, worker_host) do
       :ok ->
         :ok
@@ -33,6 +53,189 @@ defmodule SymphonyElixir.AgentRunner do
       {:error, reason} ->
         Logger.error("Agent run failed for #{issue_context(issue)}: #{inspect(reason)}")
         raise RuntimeError, "Agent run failed for #{issue_context(issue)}: #{inspect(reason)}"
+    end
+  end
+
+  # --- reviewer mode -------------------------------------------------------
+
+  defp run_reviewer_mode(issue, agent_config, opts, worker_host) do
+    reviewer_mod = Keyword.get(opts, :reviewer_mod, Modes.Reviewer)
+    mode_opts = mode_opts_from_runner_opts(opts, worker_host)
+
+    with {:ok, workspace} <- Workspace.create_for_issue(issue, worker_host),
+         {:ok, outcome} <- reviewer_mod.run(issue, workspace, agent_config, mode_opts) do
+      handle_reviewer_outcome(issue, outcome, opts)
+      :ok
+    else
+      {:error, reason} ->
+        Logger.error("Reviewer mode failed for #{issue_context(issue)}: #{inspect(reason)}")
+        apply_harness_blocked(issue, "reviewer error: #{inspect(reason)}", opts)
+        :ok
+    end
+  end
+
+  defp handle_reviewer_outcome(issue, {:pass, review}, opts) do
+    workpad_append(issue, :adversarial_review, format_review_for_workpad(review, "PASS"), opts)
+    next_state = if has_label?(issue, "auto-merge"), do: "Merging", else: "Human Review"
+    update_issue_state(issue, next_state, opts)
+  end
+
+  defp handle_reviewer_outcome(issue, {:fail, review}, opts) do
+    workpad_append(issue, :adversarial_review, format_review_for_workpad(review, "FAIL"), opts)
+    update_issue_state(issue, "Rework", opts)
+  end
+
+  defp handle_reviewer_outcome(issue, {:blocked, reason}, opts) do
+    apply_harness_blocked(issue, reason, opts)
+  end
+
+  # --- triager mode --------------------------------------------------------
+
+  defp run_triager_mode(issue, agent_config, opts, worker_host) do
+    triager_mod = Keyword.get(opts, :triager_mod, Modes.Triager)
+    mode_opts = mode_opts_from_runner_opts(opts, worker_host)
+
+    with {:ok, workspace} <- Workspace.create_for_issue(issue, worker_host),
+         {:ok, outcome} <- triager_mod.run(issue, workspace, agent_config, mode_opts) do
+      handle_triager_outcome(issue, outcome, opts)
+      :ok
+    else
+      {:error, reason} ->
+        Logger.error("Triager mode failed for #{issue_context(issue)}: #{inspect(reason)}")
+        apply_harness_blocked(issue, "triager error: #{inspect(reason)}", opts)
+        :ok
+    end
+  end
+
+  defp handle_triager_outcome(issue, {:proceed, _triage}, opts) do
+    # Builder will be dispatched on the next polling cycle.
+    update_issue_state(issue, "In Progress", opts)
+  end
+
+  defp handle_triager_outcome(issue, {:flag, triage}, opts) do
+    workpad_append(issue, :notes, "Triage flagged:\n\n" <> (triage.gap_comment || ""), opts)
+    add_label(issue, "needs-spec", opts)
+    remove_label(issue, "agent-ready", opts)
+    update_issue_state(issue, "Backlog", opts)
+  end
+
+  defp handle_triager_outcome(issue, {:blocked, reason}, opts) do
+    apply_harness_blocked(issue, reason, opts)
+  end
+
+  # --- shared mode helpers -------------------------------------------------
+
+  defp mode_opts_from_runner_opts(opts, worker_host) do
+    opts
+    |> Keyword.take([:adapter, :persona_loader, :project_dir, :mcp_config_path, :on_message, :diff_fetcher, :review_reader, :triage_reader])
+    |> Keyword.put_new(:worker_host, worker_host)
+  end
+
+  defp workpad_append(issue, section, content, opts) do
+    workpad_mod = Keyword.get(opts, :workpad_mod, Workpad)
+
+    case workpad_mod.append_section(issue.id, section, content, []) do
+      {:ok, _comment_id} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Workpad append failed for #{issue.identifier}: #{inspect(reason)}")
+        :ok
+    end
+  end
+
+  defp update_issue_state(%Issue{id: issue_id, identifier: identifier}, state_name, opts) do
+    tracker_mod = Keyword.get(opts, :tracker_mod, Tracker)
+
+    case tracker_mod.update_issue_state(issue_id, state_name) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("State transition to #{state_name} failed for #{identifier}: #{inspect(reason)}")
+        :ok
+    end
+  end
+
+  defp apply_harness_blocked(issue, reason, opts) do
+    add_label(issue, "harness-blocked", opts)
+    workpad_append(issue, :notes, "Harness BLOCKED: " <> to_string(reason), opts)
+  end
+
+  defp format_review_for_workpad(%Review{} = review, status_label) do
+    do_format_review_for_workpad(review.findings, review.notes, status_label)
+  end
+
+  defp format_review_for_workpad(%{findings: findings} = review, status_label) do
+    do_format_review_for_workpad(findings, Map.get(review, :notes), status_label)
+  end
+
+  defp do_format_review_for_workpad(findings, notes, status_label) do
+    findings_block =
+      findings
+      |> List.wrap()
+      |> Enum.map(fn
+        %{finding: f, grade: g} -> "- [#{g}] #{f}"
+        other -> "- #{inspect(other)}"
+      end)
+      |> Enum.join("\n")
+
+    notes_block =
+      case notes do
+        nil -> ""
+        "" -> ""
+        text when is_binary(text) -> "\n\n" <> text
+        other -> "\n\n" <> inspect(other)
+      end
+
+    "**#{status_label}**\n\n#{findings_block}#{notes_block}"
+  end
+
+  defp has_label?(%Issue{labels: labels}, target) when is_list(labels) do
+    Enum.any?(labels, fn
+      %{name: name} -> name == target
+      name when is_binary(name) -> name == target
+      _ -> false
+    end)
+  end
+
+  defp has_label?(_, _), do: false
+
+  defp add_label(issue, label_name, opts) do
+    tracker_mod = Keyword.get(opts, :tracker_mod, Tracker)
+
+    try do
+      case tracker_mod.add_label(issue, label_name) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning("Label add #{label_name} failed for #{issue.identifier}: #{inspect(reason)}")
+          :ok
+      end
+    rescue
+      UndefinedFunctionError ->
+        Logger.warning("Tracker.add_label/2 not implemented; skipping label #{label_name} for #{issue.identifier}")
+        :ok
+    end
+  end
+
+  defp remove_label(issue, label_name, opts) do
+    tracker_mod = Keyword.get(opts, :tracker_mod, Tracker)
+
+    try do
+      case tracker_mod.remove_label(issue, label_name) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning("Label remove #{label_name} failed for #{issue.identifier}: #{inspect(reason)}")
+          :ok
+      end
+    rescue
+      UndefinedFunctionError ->
+        Logger.warning("Tracker.remove_label/2 not implemented; skipping label #{label_name} for #{issue.identifier}")
+        :ok
     end
   end
 

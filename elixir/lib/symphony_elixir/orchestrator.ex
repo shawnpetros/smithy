@@ -685,20 +685,54 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  # Sub-pass A of the orchestrator refactor: select a mode + agent_config so the
-  # dispatch chain can thread them through to `AgentRunner.run/3`. v1 always
-  # returns `:builder`; the actual state-driven branching (Adversarial Review ->
-  # reviewer, Todo + agents.triager -> triager) lands in sub-pass B.
+  # Sub-pass B of the orchestrator refactor: real mode dispatch.
+  #
+  #   * `Adversarial Review` + at least one reviewer configured -> `:reviewer`
+  #     with the first reviewer slot (panel review is forward-compat; v1 honors
+  #     only `hd(reviewers)`).
+  #   * `Todo` + a triager configured                          -> `:triager`.
+  #     The triager only fires while the issue is still in Todo; once it
+  #     transitions to In Progress, the orchestrator picks builder on the
+  #     next polling cycle and the triager never re-fires.
+  #   * Everything else (including Adversarial Review with no reviewers, and
+  #     Todo with no triager)                                  -> `:builder`.
+  #   * No agents block at all                                 -> `{:builder, nil}`
+  #     (classic Symphony fallback).
   @spec select_agent_config_for_issue(Issue.t()) ::
           {atom(), SymphonyElixir.Config.Schema.AgentConfig.t() | nil}
-  defp select_agent_config_for_issue(%Issue{} = _issue) do
+  defp select_agent_config_for_issue(%Issue{state: state}) do
     agents = Config.settings!().agents
 
-    # TODO(sub-pass B): branch on issue.state + agents.triager / agents.reviewers
-    # to return {:reviewer, hd(agents.reviewers)} for Adversarial Review and
-    # {:triager, agents.triager} for Todo when a triager is configured.
-    {:builder, agents && agents.builder}
+    cond do
+      is_nil(agents) ->
+        # Workflow has no agents block; classic Symphony behavior.
+        {:builder, nil}
+
+      adversarial_review_state?(state) and has_reviewer?(agents) ->
+        {:reviewer, List.first(agents.reviewers)}
+
+      todo_state?(state) and not is_nil(agents.triager) ->
+        {:triager, agents.triager}
+
+      true ->
+        {:builder, agents.builder}
+    end
   end
+
+  defp adversarial_review_state?(state) when is_binary(state) do
+    String.downcase(String.trim(state)) == "adversarial review"
+  end
+
+  defp adversarial_review_state?(_), do: false
+
+  defp todo_state?(state) when is_binary(state) do
+    String.downcase(String.trim(state)) == "todo"
+  end
+
+  defp todo_state?(_), do: false
+
+  defp has_reviewer?(%{reviewers: reviewers}) when is_list(reviewers) and reviewers != [], do: true
+  defp has_reviewer?(_), do: false
 
   defp do_dispatch_issue(%State{} = state, issue, attempt, preferred_worker_host, mode, agent_config) do
     recipient = self()
