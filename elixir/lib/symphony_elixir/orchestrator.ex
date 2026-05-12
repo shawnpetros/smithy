@@ -222,14 +222,25 @@ defmodule SymphonyElixir.Orchestrator do
     {:noreply, state}
   end
 
+  @halt_label "smithy:halt"
+  @halt_all_label "smithy:halt-all"
+
   defp maybe_dispatch(%State{} = state) do
-    state = reconcile_running_issues(state)
+    state =
+      state
+      |> apply_killswitch_labels()
+      |> reconcile_running_issues()
 
     with :ok <- Config.validate!(),
+         false <- daemon_halted?(),
          {:ok, issues} <- Tracker.fetch_candidate_issues(),
          true <- available_slots(state) > 0 do
       choose_issues(issues, state)
     else
+      true ->
+        # daemon_halted? returned true; idle this poll
+        Logger.warning("Daemon halted by #{@halt_all_label} label; skipping dispatch")
+        state
       {:error, :missing_linear_api_token} ->
         Logger.error("Linear API token missing in WORKFLOW.md")
         state
@@ -272,6 +283,71 @@ defmodule SymphonyElixir.Orchestrator do
         state
     end
   end
+
+  # PER-207: operator killswitch labels.
+  #
+  # Two scopes, both applied each poll cycle:
+  #
+  #   * `smithy:halt` on a single ticket -> terminate that ticket's worker
+  #   * `smithy:halt-all` on ANY ticket in the project -> drain every worker
+  #     and idle dispatch this cycle
+  #
+  # Fail-open: a Linear API hiccup must not silently freeze the daemon. Any
+  # `{:error, _}` from the label fetch logs a warning and proceeds as if no
+  # halt labels were set. The operator's intent is "stop me when something
+  # is wrong"; failing the fetch should not preempt their actual labels.
+  defp apply_killswitch_labels(%State{} = state) do
+    case Tracker.fetch_issues_with_labels([@halt_label, @halt_all_label]) do
+      {:ok, []} ->
+        state
+
+      {:ok, halted_issues} ->
+        Enum.reduce(halted_issues, state, fn issue, state_acc ->
+          labels = issue_labels(issue)
+
+          cond do
+            @halt_all_label in labels ->
+              Logger.warning(
+                "Operator applied #{@halt_all_label} via ticket #{issue.identifier}; draining all workers"
+              )
+
+              drain_all_workers(state_acc)
+
+            @halt_label in labels and Map.has_key?(state_acc.running, issue.id) ->
+              Logger.warning(
+                "Operator applied #{@halt_label} to ticket #{issue.identifier}; terminating worker"
+              )
+
+              terminate_running_issue(state_acc, issue.id, false)
+
+            true ->
+              state_acc
+          end
+        end)
+
+      {:error, reason} ->
+        Logger.warning("Killswitch label fetch failed: #{inspect(reason)}; proceeding without")
+        state
+    end
+  end
+
+  defp daemon_halted? do
+    case Tracker.fetch_issues_with_labels([@halt_all_label]) do
+      {:ok, []} -> false
+      {:ok, _matches} -> true
+      {:error, _reason} -> false
+    end
+  end
+
+  defp drain_all_workers(%State{running: running} = state) do
+    Enum.reduce(Map.keys(running), state, fn issue_id, state_acc ->
+      terminate_running_issue(state_acc, issue_id, false)
+    end)
+  end
+
+  defp issue_labels(%Issue{labels: labels}) when is_list(labels), do: labels
+  defp issue_labels(%{labels: labels}) when is_list(labels), do: labels
+  defp issue_labels(_), do: []
 
   defp reconcile_running_issues(%State{} = state) do
     state = reconcile_stalled_running_issues(state)
