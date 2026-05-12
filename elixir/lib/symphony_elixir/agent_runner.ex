@@ -298,11 +298,10 @@ defmodule SymphonyElixir.AgentRunner do
     findings_block =
       findings
       |> List.wrap()
-      |> Enum.map(fn
+      |> Enum.map_join("\n", fn
         %{finding: f, grade: g} -> "- [#{g}] #{f}"
         other -> "- #{inspect(other)}"
       end)
-      |> Enum.join("\n")
 
     notes_block =
       case notes do
@@ -325,40 +324,28 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp has_label?(_, _), do: false
 
-  defp add_label(issue, label_name, opts) do
+  defp add_label(%Issue{id: issue_id} = issue, label_name, opts) do
     tracker_mod = Keyword.get(opts, :tracker_mod, Tracker)
 
-    try do
-      case tracker_mod.add_label(issue, label_name) do
-        :ok ->
-          :ok
+    case tracker_mod.add_label(issue_id, label_name) do
+      :ok ->
+        :ok
 
-        {:error, reason} ->
-          Logger.warning("Label add #{label_name} failed for #{issue.identifier}: #{inspect(reason)}")
-          :ok
-      end
-    rescue
-      UndefinedFunctionError ->
-        Logger.warning("Tracker.add_label/2 not implemented; skipping label #{label_name} for #{issue.identifier}")
+      {:error, reason} ->
+        Logger.warning("Label add #{label_name} failed for #{issue.identifier}: #{inspect(reason)}")
         :ok
     end
   end
 
-  defp remove_label(issue, label_name, opts) do
+  defp remove_label(%Issue{id: issue_id} = issue, label_name, opts) do
     tracker_mod = Keyword.get(opts, :tracker_mod, Tracker)
 
-    try do
-      case tracker_mod.remove_label(issue, label_name) do
-        :ok ->
-          :ok
+    case tracker_mod.remove_label(issue_id, label_name) do
+      :ok ->
+        :ok
 
-        {:error, reason} ->
-          Logger.warning("Label remove #{label_name} failed for #{issue.identifier}: #{inspect(reason)}")
-          :ok
-      end
-    rescue
-      UndefinedFunctionError ->
-        Logger.warning("Tracker.remove_label/2 not implemented; skipping label #{label_name} for #{issue.identifier}")
+      {:error, reason} ->
+        Logger.warning("Label remove #{label_name} failed for #{issue.identifier}: #{inspect(reason)}")
         :ok
     end
   end
@@ -603,9 +590,7 @@ defmodule SymphonyElixir.AgentRunner do
     :ok
   rescue
     exception ->
-      Logger.warning(
-        "Telemetry emit failed kind=#{inspect(kind)} reason=#{Exception.message(exception)}"
-      )
+      Logger.warning("Telemetry emit failed kind=#{inspect(kind)} reason=#{Exception.message(exception)}")
 
       :ok
   end

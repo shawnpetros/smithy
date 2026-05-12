@@ -166,7 +166,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert_receive :poll, 1_100
 
     Workflow.set_workflow_file_path(manual_path)
-    File.rm!(manual_path)
+    File.rm(manual_path)
     assert {:noreply, removed_state} = WorkflowStore.handle_info(:poll, path_error_state)
     assert removed_state.workflow.prompt == "Manual workflow prompt"
     assert_receive :poll, 1_100
@@ -194,12 +194,25 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_issue_states_by_ids(["issue-1"])
     assert :ok = SymphonyElixir.Tracker.create_comment("issue-1", "comment")
     assert :ok = SymphonyElixir.Tracker.update_issue_state("issue-1", "Done")
+    assert :ok = SymphonyElixir.Tracker.add_label("issue-1", "needs-spec")
+    assert :ok = SymphonyElixir.Tracker.remove_label("issue-1", "needs-spec")
     assert_receive {:memory_tracker_comment, "issue-1", "comment"}
     assert_receive {:memory_tracker_state_update, "issue-1", "Done"}
+    assert_receive {:memory_tracker_label_added, "issue-1", "needs-spec"}
+    assert_receive {:memory_tracker_label_removed, "issue-1", "needs-spec"}
+
+    memory_issue =
+      :symphony_elixir
+      |> Application.fetch_env!(:memory_tracker_issues)
+      |> Enum.find(&match?(%Issue{id: "issue-1"}, &1))
+
+    assert %Issue{labels: []} = memory_issue
 
     Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
     assert :ok = Memory.create_comment("issue-1", "quiet")
     assert :ok = Memory.update_issue_state("issue-1", "Quiet")
+    assert :ok = Memory.add_label("issue-1", "quiet-label")
+    assert :ok = Memory.remove_label("issue-1", "quiet-label")
 
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "linear")
     assert SymphonyElixir.Tracker.adapter() == Adapter
@@ -264,6 +277,60 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert_receive {:graphql_called, update_issue_query, %{issueId: "issue-1", stateId: "state-1"}}
 
     assert update_issue_query =~ "issueUpdate"
+    flush_graphql_calls()
+
+    Process.put(
+      {FakeLinearClient, :graphql_results},
+      [
+        {:ok,
+         %{
+           "data" => %{
+             "issue" => %{
+               "team" => %{
+                 "id" => "team-1",
+                 "labels" => %{"nodes" => [%{"id" => "label-needs-spec", "name" => "needs-spec"}]}
+               }
+             }
+           }
+         }},
+        {:ok, %{"data" => %{"issueAddLabel" => %{"success" => true}}}},
+        {:ok, %{"data" => %{"issueRemoveLabel" => %{"success" => true}}}}
+      ]
+    )
+
+    assert :ok = Adapter.add_label("issue-1", "needs-spec")
+    assert_receive {:graphql_called, label_lookup_query, %{issueId: "issue-1"}}
+    assert label_lookup_query =~ "labels"
+    assert_receive {:graphql_called, add_label_query, %{id: "issue-1", labelId: "label-needs-spec"}}
+    assert add_label_query =~ "issueAddLabel"
+
+    assert :ok = Adapter.remove_label("issue-1", "needs-spec")
+    assert_receive {:graphql_called, remove_label_query, %{id: "issue-1", labelId: "label-needs-spec"}}
+    assert remove_label_query =~ "issueRemoveLabel"
+
+    Process.delete({Adapter, :label_cache})
+    Process.delete({Adapter, :issue_team_cache})
+
+    Process.put(
+      {FakeLinearClient, :graphql_results},
+      [
+        {:ok,
+         %{
+           "data" => %{
+             "issue" => %{
+               "team" => %{
+                 "id" => "team-1",
+                 "labels" => %{"nodes" => [%{"id" => "label-agent-ready", "name" => "agent-ready"}]}
+               }
+             }
+           }
+         }}
+      ]
+    )
+
+    assert {:error, :unknown_label} = Adapter.add_label("issue-1", "needs-spec")
+    assert_receive {:graphql_called, _missing_label_lookup_query, %{issueId: "issue-1"}}
+    refute_receive {:graphql_called, _mutation_query, %{id: "issue-1", labelId: _}}
 
     Process.put(
       {FakeLinearClient, :graphql_results},
@@ -736,6 +803,14 @@ defmodule SymphonyElixir.ExtensionsTest do
   end
 
   defp assert_eventually(_fun, 0), do: flunk("condition not met in time")
+
+  defp flush_graphql_calls do
+    receive do
+      {:graphql_called, _query, _variables} -> flush_graphql_calls()
+    after
+      0 -> :ok
+    end
+  end
 
   defp ensure_workflow_store_running do
     if Process.whereis(WorkflowStore) do

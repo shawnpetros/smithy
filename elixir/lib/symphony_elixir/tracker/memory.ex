@@ -47,12 +47,47 @@ defmodule SymphonyElixir.Tracker.Memory do
     :ok
   end
 
+  @spec add_label(String.t(), String.t()) :: :ok | {:error, term()}
+  def add_label(issue_id, label_name) do
+    update_issue_labels(issue_id, fn labels ->
+      labels
+      |> List.wrap()
+      |> then(&[label_name | &1])
+      |> Enum.uniq()
+    end)
+
+    send_event({:memory_tracker_label_added, issue_id, label_name})
+    :ok
+  end
+
+  @spec remove_label(String.t(), String.t()) :: :ok | {:error, term()}
+  def remove_label(issue_id, label_name) do
+    update_issue_labels(issue_id, fn labels ->
+      labels
+      |> List.wrap()
+      |> Enum.reject(&(&1 == label_name))
+    end)
+
+    send_event({:memory_tracker_label_removed, issue_id, label_name})
+    :ok
+  end
+
   defp configured_issues do
     Application.get_env(:symphony_elixir, :memory_tracker_issues, [])
   end
 
   defp issue_entries do
     Enum.filter(configured_issues(), &match?(%Issue{}, &1))
+  end
+
+  defp update_issue_labels(issue_id, fun) do
+    updated_issues =
+      Enum.map(configured_issues(), fn
+        %Issue{id: ^issue_id, labels: labels} = issue -> %{issue | labels: fun.(labels)}
+        issue -> issue
+      end)
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, updated_issues)
   end
 
   defp send_event(message) do

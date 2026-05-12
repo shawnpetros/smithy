@@ -218,7 +218,7 @@ defmodule SymphonyElixir.AgentRunnerTest do
                  workpad_mod: stub_workpad_mod(workpad_table)
                )
 
-      assert {:add_label, issue, "harness-blocked"} in read_stub_calls(tracker_table)
+      assert {:add_label, "issue-rev-blocked", "harness-blocked"} in read_stub_calls(tracker_table)
 
       assert Enum.any?(read_stub_calls(workpad_table), fn
                {:append_section, "issue-rev-blocked", :notes, content, _} ->
@@ -254,7 +254,7 @@ defmodule SymphonyElixir.AgentRunnerTest do
 
       assert log =~ "Reviewer mode failed"
 
-      assert {:add_label, issue, "harness-blocked"} in read_stub_calls(tracker_table)
+      assert {:add_label, "issue-rev-err", "harness-blocked"} in read_stub_calls(tracker_table)
     end
   end
 
@@ -449,8 +449,8 @@ defmodule SymphonyElixir.AgentRunnerTest do
 
       tracker_calls = read_stub_calls(tracker_table)
 
-      assert {:add_label, issue, "needs-spec"} in tracker_calls
-      assert {:remove_label, issue, "agent-ready"} in tracker_calls
+      assert {:add_label, "issue-tri-flag", "needs-spec"} in tracker_calls
+      assert {:remove_label, "issue-tri-flag", "agent-ready"} in tracker_calls
       assert {:update_issue_state, "issue-tri-flag", "Backlog"} in tracker_calls
 
       assert [{:append_section, "issue-tri-flag", :notes, content, _}] =
@@ -479,7 +479,7 @@ defmodule SymphonyElixir.AgentRunnerTest do
                  workpad_mod: stub_workpad_mod(workpad_table)
                )
 
-      assert {:add_label, issue, "harness-blocked"} in read_stub_calls(tracker_table)
+      assert {:add_label, "issue-tri-blocked", "harness-blocked"} in read_stub_calls(tracker_table)
 
       assert Enum.any?(read_stub_calls(workpad_table), fn
                {:append_section, "issue-tri-blocked", :notes, content, _} ->
@@ -664,17 +664,17 @@ defmodule SymphonyElixir.AgentRunnerTest do
       :ok
     end
 
-    def add_label(issue, label_name) do
+    def add_label(issue_id, label_name) do
       table = :persistent_term.get({SymphonyElixir.AgentRunnerTest, :tracker_table, self()})
       seq = :ets.update_counter(table, :__seq__, {2, 1}, {:__seq__, 0})
-      :ets.insert(table, {seq, {:add_label, issue, label_name}})
+      :ets.insert(table, {seq, {:add_label, issue_id, label_name}})
       :ok
     end
 
-    def remove_label(issue, label_name) do
+    def remove_label(issue_id, label_name) do
       table = :persistent_term.get({SymphonyElixir.AgentRunnerTest, :tracker_table, self()})
       seq = :ets.update_counter(table, :__seq__, {2, 1}, {:__seq__, 0})
-      :ets.insert(table, {seq, {:remove_label, issue, label_name}})
+      :ets.insert(table, {seq, {:remove_label, issue_id, label_name}})
       :ok
     end
   end

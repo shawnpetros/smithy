@@ -510,19 +510,13 @@ defmodule SymphonyElixir.Workpad do
   defp render_checklist([]), do: "- [ ] \n"
 
   defp render_checklist(items) when is_list(items) do
-    items
-    |> Enum.map(fn item -> "- [ ] " <> to_string(item) end)
-    |> Enum.join("\n")
-    |> Kernel.<>("\n")
+    Enum.map_join(items, "\n", fn item -> "- [ ] " <> to_string(item) end) <> "\n"
   end
 
   defp render_bullets_or_placeholder([], placeholder), do: placeholder <> "\n"
 
   defp render_bullets_or_placeholder(items, _placeholder) when is_list(items) do
-    items
-    |> Enum.map(fn item -> "- " <> to_string(item) end)
-    |> Enum.join("\n")
-    |> Kernel.<>("\n")
+    Enum.map_join(items, "\n", fn item -> "- " <> to_string(item) end) <> "\n"
   end
 
   defp ensure_trailing_newline(string) do

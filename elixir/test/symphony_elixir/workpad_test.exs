@@ -75,8 +75,7 @@ defmodule SymphonyElixir.WorkpadTest do
 
             %{
               state
-              | comments_by_issue:
-                  Map.put(state.comments_by_issue, to_string(issue_id), existing ++ [new_comment])
+              | comments_by_issue: Map.put(state.comments_by_issue, to_string(issue_id), existing ++ [new_comment])
             }
           end)
 
@@ -97,18 +96,7 @@ defmodule SymphonyElixir.WorkpadTest do
       case Agent.get(pid, fn state -> Map.get(state, :update_response) end) do
         nil ->
           Agent.update(pid, fn state ->
-            updated =
-              state.comments_by_issue
-              |> Enum.map(fn {issue_id, comments} ->
-                new_comments =
-                  Enum.map(comments, fn
-                    %{id: ^comment_id} = c -> %{c | body: body}
-                    other -> other
-                  end)
-
-                {issue_id, new_comments}
-              end)
-              |> Map.new()
+            updated = replace_comment_body(state.comments_by_issue, comment_id, body)
 
             %{state | comments_by_issue: updated}
           end)
@@ -118,6 +106,20 @@ defmodule SymphonyElixir.WorkpadTest do
         response ->
           response
       end
+    end
+
+    defp replace_comment_body(comments_by_issue, comment_id, body) do
+      comments_by_issue
+      |> Enum.map(fn {issue_id, comments} ->
+        new_comments =
+          Enum.map(comments, fn
+            %{id: ^comment_id} = comment -> %{comment | body: body}
+            other -> other
+          end)
+
+        {issue_id, new_comments}
+      end)
+      |> Map.new()
     end
 
     # The stub stores its Agent pid in the process dictionary so functions can
@@ -138,8 +140,20 @@ defmodule SymphonyElixir.WorkpadTest do
   setup do
     {:ok, pid} = StubClient.start_link()
     StubClient.install(pid)
-    on_exit(fn -> if Process.alive?(pid), do: Agent.stop(pid) end)
+    on_exit(fn -> stop_stub_agent(pid) end)
     %{client: pid}
+  end
+
+  defp stop_stub_agent(pid) do
+    if Process.alive?(pid) do
+      try do
+        Agent.stop(pid)
+      catch
+        :exit, _reason -> :ok
+      end
+    end
+
+    :ok
   end
 
   describe "find/2" do

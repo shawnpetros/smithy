@@ -129,7 +129,6 @@ defmodule SymphonyElixir.Handoff.Review do
       {:ok, nil} -> {:ok, %{}}
       {:ok, _other} -> {:error, "malformed_frontmatter: REVIEW.md frontmatter must be a YAML map"}
       {:error, %{message: msg}} -> {:error, "malformed_frontmatter: parse REVIEW.md frontmatter: #{msg}"}
-      {:error, reason} -> {:error, "malformed_frontmatter: parse REVIEW.md frontmatter: #{inspect(reason)}"}
     end
   end
 
