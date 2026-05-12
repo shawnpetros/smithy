@@ -6,7 +6,10 @@ defmodule Smithy.CLI do
   See `README.md` and `v2/SPEC.md` § "Smithy wrapper" for the surface.
   """
 
+  alias Smithy.Acknowledge
+
   alias Smithy.Commands.{
+    AcknowledgeCmd,
     AddRepo,
     DaemonCmd,
     DashboardCmd,
@@ -22,9 +25,15 @@ defmodule Smithy.CLI do
     follow: :boolean,
     web: :boolean,
     json: :boolean,
-    help: :boolean
+    help: :boolean,
+    auto: :boolean,
+    reset: :boolean
   ]
   @aliases [h: :help, f: :follow]
+
+  # Subcommands that mutate or operate the harness require a prior
+  # hold-harmless acknowledgement. Read-only and meta commands do not.
+  @gated_commands ~w(add-repo remove-repo daemon)
 
   @spec main([String.t()]) :: :ok
   def main(argv) do
@@ -48,6 +57,14 @@ defmodule Smithy.CLI do
       {:error, :not_found} ->
         IO.puts(:stderr, "error: repo not found")
         exit_with(66)
+
+      {:error, :acknowledgement_required} ->
+        IO.puts(:stderr, "error: hold-harmless acknowledgement required. Run `smithy acknowledge` first.")
+        exit_with(67)
+
+      {:error, :declined} ->
+        IO.puts(:stderr, "acknowledgement declined; aborting.")
+        exit_with(68)
 
       {:error, reason} ->
         IO.puts(:stderr, "error: #{inspect(reason)}")
@@ -88,19 +105,31 @@ defmodule Smithy.CLI do
   defp do_dispatch(["version"], _opts), do: {:ok, "smithy #{Smithy.version()}"}
   defp do_dispatch(["--version"], _opts), do: {:ok, "smithy #{Smithy.version()}"}
 
-  defp do_dispatch(["add-repo" | rest], opts), do: AddRepo.run(rest, opts)
-  defp do_dispatch(["remove-repo" | rest], opts), do: RemoveRepo.run(rest, opts)
-  defp do_dispatch(["list-repos" | rest], opts), do: ListRepos.run(rest, opts)
+  defp do_dispatch(["acknowledge" | rest], opts), do: AcknowledgeCmd.run(rest, opts)
 
-  defp do_dispatch(["status" | rest], opts), do: StatusCmd.run(rest, opts)
-  defp do_dispatch(["bellows" | rest], opts), do: StatusCmd.run(rest, opts)
-  defp do_dispatch(["forge" | rest], opts), do: StatusCmd.run(rest, opts)
+  defp do_dispatch([command | _] = argv, opts) when command in @gated_commands do
+    if Acknowledge.acknowledged?() do
+      route(argv, opts)
+    else
+      {:error, :acknowledgement_required}
+    end
+  end
 
-  defp do_dispatch(["dashboard" | rest], opts), do: DashboardCmd.run(rest, opts)
-  defp do_dispatch(["logs" | rest], opts), do: LogsCmd.run(rest, opts)
-  defp do_dispatch(["daemon" | rest], opts), do: DaemonCmd.run(rest, opts)
+  defp do_dispatch(argv, opts), do: route(argv, opts)
 
-  defp do_dispatch([unknown | _], _), do: {:error, {:unknown_command, unknown}}
+  defp route(["add-repo" | rest], opts), do: AddRepo.run(rest, opts)
+  defp route(["remove-repo" | rest], opts), do: RemoveRepo.run(rest, opts)
+  defp route(["list-repos" | rest], opts), do: ListRepos.run(rest, opts)
+
+  defp route(["status" | rest], opts), do: StatusCmd.run(rest, opts)
+  defp route(["bellows" | rest], opts), do: StatusCmd.run(rest, opts)
+  defp route(["forge" | rest], opts), do: StatusCmd.run(rest, opts)
+
+  defp route(["dashboard" | rest], opts), do: DashboardCmd.run(rest, opts)
+  defp route(["logs" | rest], opts), do: LogsCmd.run(rest, opts)
+  defp route(["daemon" | rest], opts), do: DaemonCmd.run(rest, opts)
+
+  defp route([unknown | _], _), do: {:error, {:unknown_command, unknown}}
 
   defp usage do
     """
@@ -112,6 +141,10 @@ defmodule Smithy.CLI do
     COMMANDS
       version                              print version
       help                                 show this message
+
+      acknowledge                          one-time hold-harmless acknowledgement
+        --auto                             skip the interactive prompt
+        --reset                             clear an existing acknowledgement
 
       add-repo <slug> <path>               register a repo, generate launchd plist
         --workflow PATH                    workflow file (default: WORKFLOW.md)

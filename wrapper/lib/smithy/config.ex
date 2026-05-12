@@ -35,12 +35,19 @@ defmodule Smithy.Config do
           default_runtime: String.t(),
           default_workflow: String.t(),
           symphony_binary: String.t(),
+          acknowledged_at: String.t() | nil,
           repos: [repo()],
           extras: map()
         }
 
   @spec default_path() :: String.t()
-  def default_path, do: @default_path |> Path.expand()
+  def default_path do
+    # Resolve via System.get_env("HOME") so tests that override HOME pick it
+    # up at runtime; Path.expand("~/...") consults a snapshot the BEAM captured
+    # at startup and ignores later System.put_env calls.
+    home = System.get_env("HOME") || System.user_home!() || "/"
+    Path.join(home, ".smithy/config.toml")
+  end
 
   @spec defaults() :: t()
   def defaults do
@@ -48,10 +55,18 @@ defmodule Smithy.Config do
       default_runtime: @default_runtime,
       default_workflow: @default_workflow,
       symphony_binary: @default_symphony_binary,
+      acknowledged_at: nil,
       repos: [],
       extras: %{}
     }
   end
+
+  @doc """
+  Returns true when the operator has acknowledged the hold-harmless terms.
+  """
+  @spec acknowledged?(t()) :: boolean()
+  def acknowledged?(%{acknowledged_at: at}) when is_binary(at) and at != "", do: true
+  def acknowledged?(_), do: false
 
   @doc """
   Loads the config from disk. Missing file returns defaults.
@@ -117,7 +132,9 @@ defmodule Smithy.Config do
         kv("default_runtime", config.default_runtime),
         kv("default_workflow", config.default_workflow),
         kv("symphony_binary", config.symphony_binary)
-      ] ++ extras_lines(Map.get(config, :extras, %{}))
+      ]
+      |> maybe_append_acknowledgement(config)
+      |> Kernel.++(extras_lines(Map.get(config, :extras, %{})))
 
     repo_blocks =
       config.repos
@@ -136,16 +153,28 @@ defmodule Smithy.Config do
       known,
       extras
     } =
-      Map.split(rest, ["default_runtime", "default_workflow", "symphony_binary"])
+      Map.split(rest, [
+        "default_runtime",
+        "default_workflow",
+        "symphony_binary",
+        "acknowledged_at"
+      ])
 
     %{
       default_runtime: Map.get(known, "default_runtime", @default_runtime),
       default_workflow: Map.get(known, "default_workflow", @default_workflow),
       symphony_binary: Map.get(known, "symphony_binary", @default_symphony_binary),
+      acknowledged_at: Map.get(known, "acknowledged_at"),
       repos: Enum.map(repos, &normalize_repo/1),
       extras: extras
     }
   end
+
+  defp maybe_append_acknowledgement(lines, %{acknowledged_at: at}) when is_binary(at) and at != "" do
+    lines ++ [kv("acknowledged_at", at)]
+  end
+
+  defp maybe_append_acknowledgement(lines, _config), do: lines
 
   defp normalize_repo(%{} = repo) do
     %{

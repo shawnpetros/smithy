@@ -44,9 +44,11 @@ defmodule Smithy.SupervisorTest do
       assert xml =~ "<key>Label</key>"
       assert xml =~ "<string>com.shawnpetros.smithy.smithy</string>"
       assert xml =~ "<string>/usr/local/bin/symphony</string>"
-      assert xml =~ "<string>--i-understand-that-this-will-be-running-without-the-usual-guardrails</string>"
       assert xml =~ "<string>--port</string>"
       assert xml =~ "<string>4001</string>"
+      # Symphony no longer requires the --i-understand flag. The wrapper
+      # gates on a persisted acknowledgement instead (Smithy.Acknowledge).
+      refute xml =~ "--i-understand"
       assert xml =~ "<string>/Users/me/projects/smithy/WORKFLOW.md</string>"
       assert xml =~ "<key>RunAtLoad</key>"
       assert xml =~ "<true/>"

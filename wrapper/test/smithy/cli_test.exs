@@ -1,7 +1,35 @@
 defmodule Smithy.CLITest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
-  alias Smithy.CLI
+  alias Smithy.{Acknowledge, CLI, Config}
+
+  # Tests that hit CLI.dispatch/1 directly touch the on-disk acknowledgement
+  # at ~/.smithy/config.toml via Smithy.Acknowledge. Point HOME at a temp
+  # dir for the duration of the suite and seed an acknowledged config so the
+  # default dispatch paths reach their handlers as if the gate had passed.
+  # The "gating" describe block explicitly clears + asserts the gate behavior.
+
+  setup_all do
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "smithy-cli-test-#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(tmp_dir)
+    previous_home = System.get_env("HOME")
+    System.put_env("HOME", tmp_dir)
+
+    seeded =
+      Config.defaults()
+      |> Map.put(:acknowledged_at, "2026-05-12T00:00:00Z")
+
+    :ok = Config.write(seeded)
+
+    on_exit(fn ->
+      if previous_home, do: System.put_env("HOME", previous_home)
+      File.rm_rf!(tmp_dir)
+    end)
+
+    %{tmp_dir: tmp_dir}
+  end
 
   describe "dispatch/1" do
     test "no args prints usage" do
@@ -24,12 +52,58 @@ defmodule Smithy.CLITest do
       assert {:error, {:unknown_command, "wat"}} = CLI.dispatch(["wat"])
     end
 
-    test "add-repo without args is a usage error" do
+    test "add-repo without args is a usage error (gate already passed)" do
       assert {:error, :usage} = CLI.dispatch(["add-repo"])
     end
 
-    test "daemon without action is a usage error" do
+    test "daemon without action is a usage error (gate already passed)" do
       assert {:error, :usage} = CLI.dispatch(["daemon"])
+    end
+  end
+
+  describe "hold-harmless gating" do
+    setup do
+      :ok = Acknowledge.reset()
+      on_exit(fn ->
+        seeded =
+          Config.defaults()
+          |> Map.put(:acknowledged_at, "2026-05-12T00:00:00Z")
+
+        :ok = Config.write(seeded)
+      end)
+
+      :ok
+    end
+
+    test "add-repo gated by acknowledgement" do
+      assert {:error, :acknowledgement_required} =
+               CLI.dispatch(["add-repo", "x", "/tmp/x"])
+    end
+
+    test "remove-repo gated by acknowledgement" do
+      assert {:error, :acknowledgement_required} =
+               CLI.dispatch(["remove-repo", "x"])
+    end
+
+    test "daemon gated by acknowledgement" do
+      assert {:error, :acknowledgement_required} = CLI.dispatch(["daemon", "start"])
+    end
+
+    test "status NOT gated (read-only)" do
+      # status reaches its handler (then may fail for other reasons), but
+      # it does NOT trip the gate.
+      assert {:ok, _} = CLI.dispatch(["status", "--json"])
+    end
+
+    test "version NOT gated" do
+      assert {:ok, _} = CLI.dispatch(["version"])
+    end
+
+    test "acknowledge --auto records the acknowledgement" do
+      assert {:ok, _} =
+               CLI.dispatch(["acknowledge", "--auto"])
+
+      assert Acknowledge.acknowledged?()
     end
   end
 
