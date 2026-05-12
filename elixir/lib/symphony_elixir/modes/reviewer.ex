@@ -166,9 +166,16 @@ defmodule SymphonyElixir.Modes.Reviewer do
         [priv_path]
 
       project_dir when is_binary(project_dir) ->
+        # Three candidates, in priority order:
+        #   1. :code.priv_dir/1 result. Works when running from source.
+        #   2. <project_dir>/elixir/priv/personas/<name>. Works inside an agent
+        #      workspace where the project_dir is a clone of the smithy repo.
+        #      Also the escape hatch when running as an escript (where priv_dir
+        #      returns the escript binary path, which is not a directory).
+        #   3. <project_dir>/.smithy/personas/<name>. Repo-local override slot.
+        workspace_priv = Path.join([project_dir, "elixir", "priv", @personas_subdir, filename])
         repo_path = Path.join([project_dir, @repo_personas_subdir, filename])
-        # Spec says "priv/ first, fall back to repo-local". Honor that order.
-        [priv_path, repo_path]
+        [priv_path, workspace_priv, repo_path]
     end
   end
 

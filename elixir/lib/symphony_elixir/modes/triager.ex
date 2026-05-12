@@ -200,9 +200,12 @@ defmodule SymphonyElixir.Modes.Triager do
         [priv_path]
 
       project_dir when is_binary(project_dir) ->
+        # Three candidates, in priority order. See Modes.Reviewer for the
+        # same logic + commentary. Escape hatch via workspace-relative
+        # priv/personas path so the escript binary case works.
+        workspace_priv = Path.join([project_dir, "elixir", "priv", @personas_subdir, filename])
         repo_path = Path.join([project_dir, @repo_personas_subdir, filename])
-        # Spec says "priv/ first, fall back to repo-local". Honor that order.
-        [priv_path, repo_path]
+        [priv_path, workspace_priv, repo_path]
     end
   end
 
