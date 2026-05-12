@@ -48,7 +48,13 @@ defmodule Smithy.Supervisor do
     "GITHUB_TOKEN",
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
-    "CODEX_HOME"
+    "CODEX_HOME",
+    # Alerts (PER-190): bake Telegram credentials into the plist so the
+    # launchd-supervised daemon can reach the Telegram Bot API without
+    # manual launchctl setenv. Required for alerts.enabled = true to
+    # produce any messages from the production daemon path.
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_CHAT_ID"
   ]
 
   @doc """

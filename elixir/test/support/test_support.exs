@@ -22,7 +22,14 @@ defmodule SymphonyElixir.TestSupport do
       alias SymphonyElixir.Workspace
 
       import SymphonyElixir.TestSupport,
-        only: [write_workflow_file!: 1, write_workflow_file!: 2, restore_env: 2, stop_default_http_server: 0]
+        only: [
+          write_workflow_file!: 1,
+          write_workflow_file!: 2,
+          write_workflow_with_alerts!: 0,
+          write_workflow_with_alerts!: 1,
+          restore_env: 2,
+          stop_default_http_server: 0
+        ]
 
       setup do
         workflow_root =
@@ -64,6 +71,12 @@ defmodule SymphonyElixir.TestSupport do
     end
 
     :ok
+  end
+
+  def write_workflow_with_alerts!(overrides \\ []) do
+    path = SymphonyElixir.Workflow.workflow_file_path()
+    alert_defaults = [alerts_enabled: true, alerts_debounce_seconds: 0, alerts_max_retry_attempts: 3]
+    write_workflow_file!(path, Keyword.merge(alert_defaults, overrides))
   end
 
   def restore_env(key, nil), do: System.delete_env(key)
@@ -124,6 +137,10 @@ defmodule SymphonyElixir.TestSupport do
           observability_render_interval_ms: 16,
           server_port: nil,
           server_host: nil,
+          alerts_enabled: false,
+          alerts_thresholds: [0.5, 0.6, 0.8, 1.0],
+          alerts_debounce_seconds: 300,
+          alerts_max_retry_attempts: 5,
           prompt: @workflow_prompt
         ],
         overrides
@@ -161,6 +178,10 @@ defmodule SymphonyElixir.TestSupport do
     observability_render_interval_ms = Keyword.get(config, :observability_render_interval_ms)
     server_port = Keyword.get(config, :server_port)
     server_host = Keyword.get(config, :server_host)
+    alerts_enabled = Keyword.get(config, :alerts_enabled)
+    alerts_thresholds = Keyword.get(config, :alerts_thresholds)
+    alerts_debounce_seconds = Keyword.get(config, :alerts_debounce_seconds)
+    alerts_max_retry_attempts = Keyword.get(config, :alerts_max_retry_attempts)
     prompt = Keyword.get(config, :prompt)
 
     sections =
@@ -195,6 +216,7 @@ defmodule SymphonyElixir.TestSupport do
         hooks_yaml(hook_after_create, hook_before_run, hook_after_run, hook_before_remove, hook_timeout_ms),
         observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
         server_yaml(server_port, server_host),
+        alerts_yaml(alerts_enabled, alerts_thresholds, alerts_debounce_seconds, alerts_max_retry_attempts),
         "---",
         prompt
       ]
@@ -274,6 +296,17 @@ defmodule SymphonyElixir.TestSupport do
       host && "  host: #{yaml_value(host)}"
     ]
     |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp alerts_yaml(enabled, thresholds, debounce_seconds, max_retry_attempts) do
+    [
+      "alerts:",
+      "  enabled: #{yaml_value(enabled)}",
+      "  thresholds: #{yaml_value(thresholds)}",
+      "  debounce_seconds: #{yaml_value(debounce_seconds)}",
+      "  max_retry_attempts: #{yaml_value(max_retry_attempts)}"
+    ]
     |> Enum.join("\n")
   end
 
