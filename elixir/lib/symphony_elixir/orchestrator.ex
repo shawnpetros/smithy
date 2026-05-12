@@ -450,6 +450,14 @@ defmodule SymphonyElixir.Orchestrator do
           terminate_task(pid)
         end
 
+        # Belt-and-suspenders: kill any orphan claude/codex OS subprocess
+        # carrying this ticket id. Erlang Port should propagate close-on-owner-
+        # death to SIGTERM, but in practice claude can survive (process group
+        # detach, macOS orphan-handling quirks). Observed PER-190 2026-05-12:
+        # two concurrent claude procs for one ticket. Pattern-match on the
+        # identifier (which is in claude's argv via the prompt) and signal them.
+        kill_orphan_runtime_subprocesses(identifier)
+
         if is_reference(ref) do
           Process.demonitor(ref, [:flush])
         end
@@ -465,6 +473,22 @@ defmodule SymphonyElixir.Orchestrator do
         release_issue_claim(state, issue_id)
     end
   end
+
+  defp kill_orphan_runtime_subprocesses(identifier) when is_binary(identifier) do
+    # `pkill -TERM` returns 0 if processes were killed, 1 if none matched.
+    # Both are fine. Match on the ticket identifier appearing in the argv
+    # (the prompt always includes "Linear ticket `<identifier>`").
+    case System.find_executable("pkill") do
+      nil ->
+        :ok
+
+      pkill ->
+        _ = System.cmd(pkill, ["-TERM", "-f", "ticket `#{identifier}`"], stderr_to_stdout: true)
+        :ok
+    end
+  end
+
+  defp kill_orphan_runtime_subprocesses(_identifier), do: :ok
 
   defp reconcile_stalled_running_issues(%State{} = state) do
     timeout_ms = Config.settings!().codex.stall_timeout_ms
