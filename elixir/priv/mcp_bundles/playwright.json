@@ -1,0 +1,8 @@
+{
+  "_comment": "Playwright MCP server. Microsoft ships @playwright/mcp. No env vars required for basic browser automation; the package pulls its own browser binaries on first run.",
+  "playwright": {
+    "command": "npx",
+    "args": ["-y", "@playwright/mcp@latest"],
+    "env": {}
+  }
+}

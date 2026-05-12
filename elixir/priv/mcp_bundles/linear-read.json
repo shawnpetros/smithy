@@ -1,0 +1,10 @@
+{
+  "_comment": "Linear MCP server. Reads are enabled; writes are denied at runtime via --disallowedTools on the agent invocation (mcp__linear__save_*, mcp__linear__create_*, mcp__linear__delete_*). Linear publishes a hosted MCP server at https://mcp.linear.app/sse; this bundle uses it via the mcp-remote shim. TODO: if Linear publishes a first-party stdio server package, swap to that.",
+  "linear": {
+    "command": "npx",
+    "args": ["-y", "mcp-remote", "https://mcp.linear.app/sse"],
+    "env": {
+      "LINEAR_API_KEY": "${LINEAR_API_KEY}"
+    }
+  }
+}

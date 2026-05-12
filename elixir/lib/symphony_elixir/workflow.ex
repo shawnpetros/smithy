@@ -69,7 +69,7 @@ defmodule SymphonyElixir.Workflow do
 
         {:ok,
          %{
-           config: front_matter,
+           config: normalize_agents_block(front_matter),
            prompt: prompt,
            prompt_template: prompt
          }}
@@ -81,6 +81,32 @@ defmodule SymphonyElixir.Workflow do
         {:error, {:workflow_parse_error, reason}}
     end
   end
+
+  # When the `agents:` block uses the singular `reviewer:` shape (a single map),
+  # promote it into the canonical `reviewers:` list shape. v1 honors only the
+  # first reviewer, but the schema embeds_many on `reviewers` so the data shape
+  # supports length-N panels for forward compatibility.
+  @spec normalize_agents_block(map()) :: map()
+  defp normalize_agents_block(%{"agents" => agents} = config) when is_map(agents) do
+    Map.put(config, "agents", normalize_reviewer_key(agents))
+  end
+
+  defp normalize_agents_block(config), do: config
+
+  defp normalize_reviewer_key(%{"reviewer" => reviewer} = agents) when is_map(reviewer) do
+    agents
+    |> Map.delete("reviewer")
+    |> Map.update("reviewers", [reviewer], fn
+      existing when is_list(existing) -> [reviewer | existing]
+      _ -> [reviewer]
+    end)
+  end
+
+  defp normalize_reviewer_key(%{"reviewer" => nil} = agents) do
+    Map.delete(agents, "reviewer")
+  end
+
+  defp normalize_reviewer_key(agents), do: agents
 
   defp split_front_matter(content) do
     lines = String.split(content, ~r/\R/, trim: false)

@@ -50,7 +50,9 @@ defmodule SymphonyElixir.Config.Schema do
       field(:api_key, :string)
       field(:project_slug, :string)
       field(:assignee, :string)
-      field(:active_states, {:array, :string}, default: ["Todo", "In Progress"])
+      field(:active_states, {:array, :string},
+        default: ["Todo", "In Progress", "Adversarial Review", "Rework"]
+      )
       field(:terminal_states, {:array, :string}, default: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"])
       field(:labels, {:array, :string}, default: [])
     end
@@ -262,6 +264,69 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
+  defmodule AgentConfig do
+    @moduledoc """
+    A single agent slot in the three-axis config (mode, runtime, persona).
+
+    Each slot also carries an `mcp` whitelist (named bundle identifiers) and a
+    `tier` string (a model tier label that the runtime adapter maps to a
+    concrete model name or reasoning effort). v1 honors only the first entry
+    of the `reviewers` list; the data shape supports length-N panels for
+    forward compatibility with v2 speccing-mode.
+    """
+
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    @primary_key false
+    embedded_schema do
+      field(:mode, Ecto.Enum, values: [:builder, :reviewer, :triager])
+      field(:runtime, Ecto.Enum, values: [:codex, :claude_code])
+      field(:persona, :string)
+      field(:mcp, {:array, :string}, default: [])
+      field(:tier, :string, default: "medium")
+    end
+
+    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
+    def changeset(schema, attrs) do
+      schema
+      |> cast(attrs, [:mode, :runtime, :persona, :mcp, :tier], empty_values: [])
+      |> validate_required([:mode, :runtime])
+    end
+  end
+
+  defmodule Agents do
+    @moduledoc """
+    Three-axis agent dispatch configuration.
+
+    `builder` is the canonical builder slot (always present, defaulted to
+    vanilla Symphony behavior when the workflow omits the block).
+    `reviewers` is a list for forward-compatible panel review; v1 honors only
+    the first element. `triager` is optional and gates `In Progress`.
+    """
+
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    alias SymphonyElixir.Config.Schema.AgentConfig
+
+    @primary_key false
+    embedded_schema do
+      embeds_one(:builder, AgentConfig, on_replace: :update)
+      embeds_many(:reviewers, AgentConfig, on_replace: :delete)
+      embeds_one(:triager, AgentConfig, on_replace: :update)
+    end
+
+    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
+    def changeset(schema, attrs) do
+      schema
+      |> cast(attrs, [])
+      |> cast_embed(:builder, with: &AgentConfig.changeset/2)
+      |> cast_embed(:reviewers, with: &AgentConfig.changeset/2)
+      |> cast_embed(:triager, with: &AgentConfig.changeset/2)
+    end
+  end
+
   embedded_schema do
     embeds_one(:tracker, Tracker, on_replace: :update, defaults_to_struct: true)
     embeds_one(:polling, Polling, on_replace: :update, defaults_to_struct: true)
@@ -272,6 +337,7 @@ defmodule SymphonyElixir.Config.Schema do
     embeds_one(:hooks, Hooks, on_replace: :update, defaults_to_struct: true)
     embeds_one(:observability, Observability, on_replace: :update, defaults_to_struct: true)
     embeds_one(:server, Server, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:agents, Agents, on_replace: :update, defaults_to_struct: true)
   end
 
   @spec parse(map()) :: {:ok, %__MODULE__{}} | {:error, {:invalid_workflow_config, String.t()}}
@@ -364,6 +430,7 @@ defmodule SymphonyElixir.Config.Schema do
     |> cast_embed(:hooks, with: &Hooks.changeset/2)
     |> cast_embed(:observability, with: &Observability.changeset/2)
     |> cast_embed(:server, with: &Server.changeset/2)
+    |> cast_embed(:agents, with: &Agents.changeset/2)
   end
 
   defp finalize_settings(settings) do
@@ -384,7 +451,26 @@ defmodule SymphonyElixir.Config.Schema do
         turn_sandbox_policy: normalize_optional_map(settings.codex.turn_sandbox_policy)
     }
 
-    %{settings | tracker: tracker, workspace: workspace, codex: codex}
+    agents = finalize_agents(settings.agents)
+
+    %{settings | tracker: tracker, workspace: workspace, codex: codex, agents: agents}
+  end
+
+  defp finalize_agents(%Agents{} = agents) do
+    builder = agents.builder || default_builder()
+    %{agents | builder: builder}
+  end
+
+  defp finalize_agents(nil), do: %Agents{builder: default_builder(), reviewers: [], triager: nil}
+
+  defp default_builder do
+    %AgentConfig{
+      mode: :builder,
+      runtime: :codex,
+      persona: nil,
+      mcp: [],
+      tier: "medium"
+    }
   end
 
   defp normalize_keys(value) when is_map(value) do
@@ -544,7 +630,18 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   defp flatten_errors(errors, prefix) when is_list(errors) do
-    Enum.map(errors, &(prefix <> " " <> &1))
+    errors
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {entry, _index} when is_binary(entry) ->
+        [prefix <> " " <> entry]
+
+      {entry, index} when is_map(entry) ->
+        flatten_errors(entry, prefix <> "[#{index}]")
+
+      {entry, _index} when is_list(entry) ->
+        flatten_errors(entry, prefix)
+    end)
   end
 
   defp translate_error({message, options}) do
