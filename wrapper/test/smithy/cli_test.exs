@@ -75,18 +75,20 @@ defmodule Smithy.CLITest do
       :ok
     end
 
-    test "add-repo gated by acknowledgement" do
-      assert {:error, :acknowledgement_required} =
-               CLI.dispatch(["add-repo", "x", "/tmp/x"])
+    # First-run gated commands prompt inline. Tests can't easily simulate
+    # stdin, but the EOF path through Acknowledge.run/1 returns :declined
+    # which lets us assert the gate fires without acknowledging.
+
+    test "add-repo prompts inline on first run; declines on EOF" do
+      assert {:error, :declined} = CLI.dispatch(["add-repo", "x", "/tmp/x"])
     end
 
-    test "remove-repo gated by acknowledgement" do
-      assert {:error, :acknowledgement_required} =
-               CLI.dispatch(["remove-repo", "x"])
+    test "remove-repo prompts inline; declines on EOF" do
+      assert {:error, :declined} = CLI.dispatch(["remove-repo", "x"])
     end
 
-    test "daemon gated by acknowledgement" do
-      assert {:error, :acknowledgement_required} = CLI.dispatch(["daemon", "start"])
+    test "daemon prompts inline; declines on EOF" do
+      assert {:error, :declined} = CLI.dispatch(["daemon", "start"])
     end
 
     test "status NOT gated (read-only)" do

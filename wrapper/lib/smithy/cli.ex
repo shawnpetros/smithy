@@ -111,7 +111,15 @@ defmodule Smithy.CLI do
     if Acknowledge.acknowledged?() do
       route(argv, opts)
     else
-      {:error, :acknowledgement_required}
+      # First-run: prompt inline rather than bouncing with "go run
+      # smithy acknowledge first." If the operator declines, abort.
+      # Non-interactive callers (CI, scripted setup) pre-acknowledge
+      # via `smithy acknowledge --auto`.
+      case Acknowledge.run([]) do
+        :ok -> route(argv, opts)
+        {:error, :declined} -> {:error, :declined}
+        err -> err
+      end
     end
   end
 
