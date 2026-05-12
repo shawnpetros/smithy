@@ -120,6 +120,7 @@ defmodule SymphonyElixir.Config.SchemaTest do
                })
 
       assert length(settings.agents.reviewers) == 2
+
       assert Enum.map(settings.agents.reviewers, & &1.persona) ==
                ["reviewer.md", "architect-reviewer.md"]
     end

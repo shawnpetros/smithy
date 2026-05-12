@@ -394,6 +394,7 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.EventParserTest do
       content = File.read!(@fixture_minimal)
       events = EventParser.parse_stream(content)
       filtered = EventParser.without_hooks(events)
+
       assert length(events) > length(filtered),
              "expected hook events in noisy fixture; got 0"
     end

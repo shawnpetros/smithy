@@ -811,11 +811,20 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       end
     end)
 
-    assert %{polling: %{checking?: true}} =
+    assert %{
+             polling: %{
+               checking?: startup_checking?,
+               next_poll_in_ms: startup_next_poll_in_ms
+             }
+           } =
              wait_for_snapshot(
                pid,
                fn
                  %{polling: %{checking?: true}} ->
+                   true
+
+                 %{polling: %{checking?: false, next_poll_in_ms: due_in_ms}}
+                 when is_integer(due_in_ms) and due_in_ms <= 5_000 ->
                    true
 
                  _ ->
@@ -823,6 +832,13 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
                end,
                500
              )
+
+    # The checking state is intentionally only held for the dashboard render
+    # delay, so a loaded scheduler may observe the completed immediate poll.
+    unless startup_checking? do
+      assert is_integer(startup_next_poll_in_ms)
+      assert startup_next_poll_in_ms >= 0
+    end
 
     assert %{
              polling: %{

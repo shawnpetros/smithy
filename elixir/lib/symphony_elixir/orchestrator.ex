@@ -708,7 +708,7 @@ defmodule SymphonyElixir.Orchestrator do
   #     transitions to In Progress, the orchestrator picks builder on the
   #     next polling cycle and the triager never re-fires.
   #   * Everything else (including Adversarial Review with no reviewers, and
-  #     Todo with no triager)                                  -> `:builder`.
+  #     the untriaged Todo state)                              -> `:builder`.
   #   * No agents block at all                                 -> `{:builder, nil}`
   #     (classic Symphony fallback).
   @spec select_agent_config_for_issue(Issue.t()) ::
@@ -852,6 +852,8 @@ defmodule SymphonyElixir.Orchestrator do
     delay_ms = retry_delay(next_attempt, metadata)
     old_timer = Map.get(previous_retry, :timer_ref)
     retry_token = make_ref()
+    # Retry due-times are relative scheduling deadlines, so keep them on the
+    # monotonic clock that `Process.send_after/3` effectively follows.
     due_at_ms = System.monotonic_time(:millisecond) + delay_ms
     identifier = pick_retry_identifier(issue_id, previous_retry, metadata)
     error = pick_retry_error(previous_retry, metadata)
