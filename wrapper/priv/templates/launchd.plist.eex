@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.shawnpetros.smithy.<%= repo.slug %></string>
+  <key>ProgramArguments</key>
+  <array>
+    <string><%= repo.symphony_binary %></string>
+    <string>--logs-root</string>
+    <string><%= repo.logs_dir %></string>
+    <string>--port</string>
+    <string><%= repo.port %></string>
+    <string><%= Path.join(repo.path, repo.workflow) %></string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string><%= Path.join(repo.logs_dir, "stdout.log") %></string>
+  <key>StandardErrorPath</key>
+  <string><%= Path.join(repo.logs_dir, "stderr.log") %></string>
+  <key>WorkingDirectory</key>
+  <string><%= repo.path %></string>
+</dict>
+</plist>
