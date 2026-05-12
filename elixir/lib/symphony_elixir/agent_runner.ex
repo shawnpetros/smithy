@@ -298,11 +298,10 @@ defmodule SymphonyElixir.AgentRunner do
     findings_block =
       findings
       |> List.wrap()
-      |> Enum.map(fn
+      |> Enum.map_join("\n", fn
         %{finding: f, grade: g} -> "- [#{g}] #{f}"
         other -> "- #{inspect(other)}"
       end)
-      |> Enum.join("\n")
 
     notes_block =
       case notes do
@@ -603,9 +602,7 @@ defmodule SymphonyElixir.AgentRunner do
     :ok
   rescue
     exception ->
-      Logger.warning(
-        "Telemetry emit failed kind=#{inspect(kind)} reason=#{Exception.message(exception)}"
-      )
+      Logger.warning("Telemetry emit failed kind=#{inspect(kind)} reason=#{Exception.message(exception)}")
 
       :ok
   end

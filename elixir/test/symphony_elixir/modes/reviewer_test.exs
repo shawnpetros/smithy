@@ -12,6 +12,7 @@ defmodule SymphonyElixir.Modes.ReviewerTest do
   defmodule StubAdapter do
     def start_session(workspace, opts) do
       tag = Keyword.fetch!(opts, :__tag__)
+
       Agent.update(tag, fn state ->
         Map.update!(state, :start_calls, &[%{workspace: workspace, opts: opts} | &1])
       end)
@@ -461,6 +462,7 @@ defmodule SymphonyElixir.Modes.ReviewerTest do
 
       path = Agent.get(tag, & &1.seen_path)
       assert path != nil
+
       assert String.ends_with?(path, "priv/personas/reviewer.md") or
                String.contains?(path, "/priv/personas/reviewer.md")
     end

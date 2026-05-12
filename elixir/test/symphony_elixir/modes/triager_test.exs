@@ -143,8 +143,7 @@ defmodule SymphonyElixir.Modes.TriagerTest do
          description: "stub",
          mode: :triager,
          runtime: :codex,
-         body:
-           "Triage {{identifier}}: {{title}}\nLabels: {{labels}}\nBranch: {{branch}}\nDescription:\n{{description}}"
+         body: "Triage {{identifier}}: {{title}}\nLabels: {{labels}}\nBranch: {{branch}}\nDescription:\n{{description}}"
        }}
     end
   end

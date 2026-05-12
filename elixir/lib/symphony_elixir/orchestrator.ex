@@ -695,7 +695,7 @@ defmodule SymphonyElixir.Orchestrator do
   #     transitions to In Progress, the orchestrator picks builder on the
   #     next polling cycle and the triager never re-fires.
   #   * Everything else (including Adversarial Review with no reviewers, and
-  #     Todo with no triager)                                  -> `:builder`.
+  #     `Todo` with no triager)                                -> `:builder`.
   #   * No agents block at all                                 -> `{:builder, nil}`
   #     (classic Symphony fallback).
   @spec select_agent_config_for_issue(Issue.t()) ::
@@ -704,10 +704,6 @@ defmodule SymphonyElixir.Orchestrator do
     agents = Config.settings!().agents
 
     cond do
-      is_nil(agents) ->
-        # Workflow has no agents block; classic Symphony behavior.
-        {:builder, nil}
-
       adversarial_review_state?(state) and has_reviewer?(agents) ->
         {:reviewer, List.first(agents.reviewers)}
 

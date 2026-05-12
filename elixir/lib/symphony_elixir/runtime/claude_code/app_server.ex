@@ -76,8 +76,7 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.AppServer do
         persona_path: Keyword.get(opts, :persona_path),
         tier: Keyword.get(opts, :tier, :sonnet),
         mcp_config_path: Keyword.get(opts, :mcp_config_path),
-        disallowed_tools:
-          Keyword.get(opts, :disallowed_tools, Argv.default_disallowed_tools()),
+        disallowed_tools: Keyword.get(opts, :disallowed_tools, Argv.default_disallowed_tools()),
         claude_bin: resolve_claude_bin(Keyword.get(opts, :claude_bin)),
         accumulator: ""
       }
@@ -240,22 +239,11 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.AppServer do
   end
 
   defp close_port(port) when is_port(port) do
-    case :erlang.port_info(port) do
-      :undefined ->
-        :ok
-
-      _ ->
-        try do
-          Port.close(port)
-        rescue
-          ArgumentError -> :ok
-        end
-
-        :ok
-    end
+    _ = Port.close(port)
+    :ok
+  rescue
+    ArgumentError -> :ok
   end
-
-  defp close_port(_), do: :ok
 
   # ----- internal: receive loop -----
 
@@ -286,6 +274,21 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.AppServer do
   # Public-ish helper so tests can simulate the chunk path without a real port.
   # Not part of the @callback contract; mark with @doc false to hide from docs.
   @doc false
+  @spec process_chunk(
+          session(),
+          String.t(),
+          (EventParser.event() -> term()),
+          non_neg_integer(),
+          String.t() | nil,
+          non_neg_integer()
+        ) ::
+          {:ok,
+           %{
+             result: EventParser.result_summary(),
+             session_id: String.t() | nil,
+             event_count: non_neg_integer()
+           }}
+          | {:error, term()}
   def process_chunk(session, chunk, on_message, timeout_ms, captured_session_id, event_count) do
     {complete_lines, remainder} = split_lines(session.accumulator <> chunk)
 
