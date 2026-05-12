@@ -8,6 +8,7 @@ defmodule SymphonyElixir.Orchestrator do
   import Bitwise, only: [<<<: 2]
 
   alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.Config.Schema.AgentConfig
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -711,6 +712,8 @@ defmodule SymphonyElixir.Orchestrator do
   #     the untriaged Todo state)                              -> `:builder`.
   #   * No agents block at all                                 -> `{:builder, nil}`
   #     (classic Symphony fallback).
+  #   * Explicit `agents.builder: null`                         -> fail loud
+  #     when builder dispatch is needed.
   @spec select_agent_config_for_issue(Issue.t()) ::
           {atom(), SymphonyElixir.Config.Schema.AgentConfig.t() | nil}
   defp select_agent_config_for_issue(%Issue{state: state}) do
@@ -728,8 +731,15 @@ defmodule SymphonyElixir.Orchestrator do
         {:triager, agents.triager}
 
       true ->
-        {:builder, agents.builder}
+        builder_agent_config(agents)
     end
+  end
+
+  defp builder_agent_config(%{builder: %AgentConfig{} = builder}), do: {:builder, builder}
+
+  defp builder_agent_config(_agents) do
+    raise ArgumentError,
+          "agents.builder is required for builder dispatch; configure agents.builder or remove explicit builder: null"
   end
 
   defp adversarial_review_state?(state) when is_binary(state) do
