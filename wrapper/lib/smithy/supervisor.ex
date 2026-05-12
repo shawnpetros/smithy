@@ -37,14 +37,28 @@ defmodule Smithy.Supervisor do
   @spec logs_dir(String.t()) :: String.t()
   def logs_dir(slug), do: Path.expand("~/.smithy/logs/#{slug}")
 
+  # Env vars the wrapper captures from the operator's shell at `smithy
+  # add-repo` time and bakes into the launchd plist's EnvironmentVariables
+  # block. Symphony's tracker / git / agent runners read these via
+  # System.get_env. launchd does NOT inherit the operator's shell env, so
+  # without this capture the daemon polls Linear silently and gets rejected.
+  @captured_env_vars [
+    "LINEAR_API_KEY",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "CODEX_HOME"
+  ]
+
   @doc """
   Renders the plist XML for a registered repo. Pure: no filesystem effect.
 
   The plist sets EnvironmentVariables.PATH so launchd can find `escript`
   (needed by Symphony's escript shebang) plus any other binaries the
-  workflow hooks may shell out to. The path captured here is the PATH
-  active when `smithy add-repo` was run, prefixed onto the standard
-  launchd PATH.
+  workflow hooks may shell out to. It also captures a set of API-key env
+  vars from the operator's shell so the daemon can authenticate to Linear,
+  GitHub, and the agent runtimes without manual launchctl setenv.
   """
   @spec render_plist(Config.repo(), Config.t()) :: String.t()
   def render_plist(repo, config) do
@@ -56,7 +70,8 @@ defmodule Smithy.Supervisor do
         port: repo.port,
         logs_dir: logs_dir(repo.slug),
         symphony_binary: config.symphony_binary,
-        path_env: path_env_for_launchd()
+        path_env: path_env_for_launchd(),
+        captured_env: captured_env_for_launchd()
       }
     ]
 
@@ -77,6 +92,22 @@ defmodule Smithy.Supervisor do
     |> Enum.reject(&(&1 == ""))
     |> Enum.join(":")
   end
+
+  @doc false
+  # Captures a set of known env vars (API keys, runtime homes) from the
+  # operator's shell at registration time. Returns a list of {key, value}
+  # tuples that the plist template renders into EnvironmentVariables.
+  # Skips vars that are unset; never injects empty strings.
+  @spec captured_env_for_launchd() :: [{String.t(), String.t()}]
+  def captured_env_for_launchd do
+    @captured_env_vars
+    |> Enum.map(fn key -> {key, System.get_env(key)} end)
+    |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
+  end
+
+  @doc "Exposed for tests + operator-facing diagnostics."
+  @spec captured_env_var_names() :: [String.t()]
+  def captured_env_var_names, do: @captured_env_vars
 
   @doc """
   Writes the plist to disk under `~/Library/LaunchAgents/`. Also ensures
