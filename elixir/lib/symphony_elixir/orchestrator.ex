@@ -333,6 +333,13 @@ defmodule SymphonyElixir.Orchestrator do
     select_worker_host(state, preferred_worker_host)
   end
 
+  @doc false
+  @spec select_agent_config_for_issue_for_test(Issue.t()) ::
+          {atom(), SymphonyElixir.Config.Schema.AgentConfig.t() | nil}
+  def select_agent_config_for_issue_for_test(%Issue{} = issue) do
+    select_agent_config_for_issue(issue)
+  end
+
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
 
   defp reconcile_running_issue_states([issue | rest], state, active_states, terminal_states) do
@@ -660,7 +667,8 @@ defmodule SymphonyElixir.Orchestrator do
   defp dispatch_issue(%State{} = state, issue, attempt \\ nil, preferred_worker_host \\ nil) do
     case revalidate_issue_for_dispatch(issue, &Tracker.fetch_issue_states_by_ids/1, terminal_state_set()) do
       {:ok, %Issue{} = refreshed_issue} ->
-        do_dispatch_issue(state, refreshed_issue, attempt, preferred_worker_host)
+        {mode, agent_config} = select_agent_config_for_issue(refreshed_issue)
+        do_dispatch_issue(state, refreshed_issue, attempt, preferred_worker_host, mode, agent_config)
 
       {:skip, :missing} ->
         Logger.info("Skipping dispatch; issue no longer active or visible: #{issue_context(issue)}")
@@ -677,7 +685,22 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp do_dispatch_issue(%State{} = state, issue, attempt, preferred_worker_host) do
+  # Sub-pass A of the orchestrator refactor: select a mode + agent_config so the
+  # dispatch chain can thread them through to `AgentRunner.run/3`. v1 always
+  # returns `:builder`; the actual state-driven branching (Adversarial Review ->
+  # reviewer, Todo + agents.triager -> triager) lands in sub-pass B.
+  @spec select_agent_config_for_issue(Issue.t()) ::
+          {atom(), SymphonyElixir.Config.Schema.AgentConfig.t() | nil}
+  defp select_agent_config_for_issue(%Issue{} = _issue) do
+    agents = Config.settings!().agents
+
+    # TODO(sub-pass B): branch on issue.state + agents.triager / agents.reviewers
+    # to return {:reviewer, hd(agents.reviewers)} for Adversarial Review and
+    # {:triager, agents.triager} for Todo when a triager is configured.
+    {:builder, agents && agents.builder}
+  end
+
+  defp do_dispatch_issue(%State{} = state, issue, attempt, preferred_worker_host, mode, agent_config) do
     recipient = self()
 
     case select_worker_host(state, preferred_worker_host) do
@@ -686,13 +709,18 @@ defmodule SymphonyElixir.Orchestrator do
         state
 
       worker_host ->
-        spawn_issue_on_worker_host(state, issue, attempt, recipient, worker_host)
+        spawn_issue_on_worker_host(state, issue, attempt, recipient, worker_host, mode, agent_config)
     end
   end
 
-  defp spawn_issue_on_worker_host(%State{} = state, issue, attempt, recipient, worker_host) do
+  defp spawn_issue_on_worker_host(%State{} = state, issue, attempt, recipient, worker_host, mode, agent_config) do
     case Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
-           AgentRunner.run(issue, recipient, attempt: attempt, worker_host: worker_host)
+           AgentRunner.run(issue, recipient,
+             attempt: attempt,
+             worker_host: worker_host,
+             mode: mode,
+             agent_config: agent_config
+           )
          end) do
       {:ok, pid} ->
         ref = Process.monitor(pid)

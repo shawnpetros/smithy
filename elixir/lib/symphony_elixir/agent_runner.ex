@@ -14,7 +14,17 @@ defmodule SymphonyElixir.AgentRunner do
     # The orchestrator owns host retries so one worker lifetime never hops machines.
     worker_host = selected_worker_host(Keyword.get(opts, :worker_host), Config.settings!().worker.ssh_hosts)
 
-    Logger.info("Starting agent run for #{issue_context(issue)} worker_host=#{worker_host_for_log(worker_host)}")
+    mode = Keyword.get(opts, :mode, :builder)
+    agent_config = Keyword.get(opts, :agent_config)
+
+    # Sub-pass A: always go through the existing builder path.
+    # Sub-pass B will branch on mode here:
+    #   :builder  -> existing flow (possibly with runtime adapter selection from agent_config.runtime)
+    #   :reviewer -> Modes.Reviewer.run/4 then return outcome
+    #   :triager  -> Modes.Triager.run/4 then return outcome
+    _ = {mode, agent_config}
+
+    Logger.info("Starting agent run for #{issue_context(issue)} mode=#{mode} worker_host=#{worker_host_for_log(worker_host)}")
 
     case run_on_worker_host(issue, codex_update_recipient, opts, worker_host) do
       :ok ->
