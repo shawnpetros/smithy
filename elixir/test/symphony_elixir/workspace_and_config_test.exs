@@ -601,12 +601,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       blocked_by: [%{id: "a-id", identifier: "MT-A", state: "In Progress"}]
     }
 
-    # Poll cycle 1: A is active (In Progress) - B must not dispatch.
-    refute Orchestrator.should_dispatch_issue_for_test(issue_b, state)
+    # Poll cycle 1: A is active (In Progress) - B is excluded from choose_issues.
+    assert Orchestrator.choose_issues_for_test([issue_b], state) == []
 
-    # Poll cycle 2: A reaches terminal (Done) - B is now dispatchable.
+    # Poll cycle 2: A reaches terminal (Done) - B passes through choose_issues.
     issue_b_unblocked = %{issue_b | blocked_by: [%{id: "a-id", identifier: "MT-A", state: "Done"}]}
-    assert Orchestrator.should_dispatch_issue_for_test(issue_b_unblocked, state)
+    assert [%Issue{identifier: "MT-B"}] = Orchestrator.choose_issues_for_test([issue_b_unblocked], state)
   end
 
   test "workspace remove returns error information for missing directory" do
