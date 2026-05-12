@@ -15,7 +15,7 @@ defmodule Smithy.MixProject do
   end
 
   def application do
-    [extra_applications: [:logger, :inets, :ssl, :crypto]]
+    [extra_applications: [:logger, :inets, :ssl, :crypto, :eex]]
   end
 
   defp deps do
