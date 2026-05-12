@@ -12,16 +12,26 @@ The harness itself is dumb. Intelligence lives in the agents that work on each t
 
 ## Status
 
-**Current release: `v2.0.0-alpha-0`.** The fork is alive and tracks `openai/symphony` upstream. Two opinion layers ship in alpha-0:
+**Current release: `v2.0.0-alpha-1-preview`.** The v2.1 architecture (rewritten 2026-05-11) is mostly built; final orchestrator wiring is the last brick. See [`v2/SPEC.md`](v2/SPEC.md) for the polished design and [`v2/edge-cases.md`](v2/edge-cases.md) for the failure-mode catalog.
 
-- **Label-gated ticket pickup.** A new optional `tracker.labels` field on the workflow config. When set, the harness only acts on Linear issues that carry one of the configured labels. Default behavior (empty labels list) is unchanged from upstream Symphony. Useful when one Linear team mixes harness-driven work with human-only work.
-- **`Adversarial Review` state slot.** A new state in the workflow state machine, between `In Progress` and `Human Review`. The build worker transitions here after the PR is open and validated. An external reviewer agent ([Anvil](https://github.com/shawnpetros/anvil) is the public reference) polls this state, runs a cross-model audit on the diff, and transitions to `Human Review` on pass or `Rework` on fail. In alpha-0 the state slot exists; the in-process cross-model reviewer (no external daemon required) lands in alpha-1.
+What's in the preview:
 
-A working example workflow that uses both features lives at [`examples/chatbot-demo-workflow.md`](examples/chatbot-demo-workflow.md), wired against [`shawnpetros/anvil-demo-chatbot`](https://github.com/shawnpetros/anvil-demo-chatbot).
+- **Three-axis agent config** (mode, runtime, persona) plus per-agent MCP scoping and tier. Workflows declare an `agents:` block with `builder`, `reviewers` (list, length-1 in v1, length-N reviewer panels reserved for v2), and optional `triager`.
+- **Two runtimes:** Codex (existing) and Claude Code (new). Cross-model adversarial review just works: configure builder on one runtime and reviewer on another.
+- **Three modes:** `builder` (existing Symphony worker), `reviewer` (ports Anvil's adversarial-review logic inward; Anvil retires as a separate component for Smithy users), `triager` (front-of-queue spec-quality gate).
+- **Smithy CLI wrapper** (`wrapper/` subdirectory): multi-repo supervisor with `smithy status` aggregate TUI, `smithy dashboard` browser launcher, `smithy bellows`/`forge` themed aliases, `smithy logs`, `smithy daemon`, `smithy add-repo`/`remove-repo`. launchd plists generated per registered repo.
+- **Structured handoff parsers** for REVIEW.md and TRIAGE.md with graded findings (blocker/polish/future) and decision (proceed/flag).
+- **Persona library** at `priv/personas/` with markdown templates Anvil-style. Repo-local overrides supported.
+- **MCP bundle library** at `priv/mcp_bundles/` with linear-read, github, playwright bundles. Workers spawn with `--strict-mcp-config` so user-scope MCP servers don't leak.
+- **Universal AGENTS.md template** at `elixir/priv/templates/AGENTS.md`. Both Codex and Claude Code read it; one source of truth for repo conventions.
 
-The full v2 architecture (10+ capabilities) is in [`v2/SPEC.md`](v2/SPEC.md). Alphas ship in dependency order; tag list is the truth for what's currently in.
+What's NOT yet wired (lands in `v2.0.0-alpha-1` proper):
 
-The Rust v1 prototype lives at [`shawnpetros/smithy-v1`](https://github.com/shawnpetros/smithy-v1) and is archive material. v2 is the path forward.
+- Orchestrator/AgentRunner refactor to actually route tickets through mode dispatch based on state. Today the new modes are usable as library calls but not invoked by the polling loop.
+- Self-update flow (`smithy:self-update` label + drain-rebuild-respawn protocol).
+- Linux systemd unit template (macOS launchd ships in preview; Linux is a follow-up).
+
+The Rust v1 prototype lives at [`shawnpetros/smithy-v1`](https://github.com/shawnpetros/smithy-v1) and is archive material. v2.1 ports the concepts to the Symphony Elixir fork.
 
 ## What v2 does (target shape)
 
