@@ -91,6 +91,36 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.AppServerTest do
     end
   end
 
+  describe "default_turn_timeout_ms/0" do
+    setup do
+      previous = System.get_env("SYMPHONY_CLAUDE_CODE_TURN_TIMEOUT_MS")
+
+      on_exit(fn ->
+        restore_env("SYMPHONY_CLAUDE_CODE_TURN_TIMEOUT_MS", previous)
+      end)
+
+      :ok
+    end
+
+    test "defaults to the built-in timeout" do
+      System.delete_env("SYMPHONY_CLAUDE_CODE_TURN_TIMEOUT_MS")
+      assert AppServer.default_turn_timeout_ms() == 600_000
+    end
+
+    test "uses a positive integer env fallback" do
+      System.put_env("SYMPHONY_CLAUDE_CODE_TURN_TIMEOUT_MS", "900000")
+      assert AppServer.default_turn_timeout_ms() == 900_000
+    end
+
+    test "ignores invalid env values" do
+      System.put_env("SYMPHONY_CLAUDE_CODE_TURN_TIMEOUT_MS", "0")
+      assert AppServer.default_turn_timeout_ms() == 600_000
+
+      System.put_env("SYMPHONY_CLAUDE_CODE_TURN_TIMEOUT_MS", "not-an-integer")
+      assert AppServer.default_turn_timeout_ms() == 600_000
+    end
+  end
+
   describe "stop_session/1" do
     test "is a no-op when port is nil" do
       assert :ok = AppServer.stop_session(%{port: nil})
@@ -375,4 +405,7 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.AppServerTest do
   defp events_collected({:ok, pid}) do
     Agent.get(pid, & &1)
   end
+
+  defp restore_env(key, nil), do: System.delete_env(key)
+  defp restore_env(key, value), do: System.put_env(key, value)
 end

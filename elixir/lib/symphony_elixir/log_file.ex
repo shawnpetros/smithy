@@ -22,11 +22,17 @@ defmodule SymphonyElixir.LogFile do
 
   @spec configure() :: :ok
   def configure do
-    log_file = Application.get_env(:symphony_elixir, :log_file, default_log_file())
-    max_bytes = Application.get_env(:symphony_elixir, :log_file_max_bytes, @default_max_bytes)
-    max_files = Application.get_env(:symphony_elixir, :log_file_max_files, @default_max_files)
+    case Application.get_env(:symphony_elixir, :log_format, :file) do
+      :stdout ->
+        setup_stdout_handler()
 
-    setup_disk_handler(log_file, max_bytes, max_files)
+      _ ->
+        log_file = Application.get_env(:symphony_elixir, :log_file, default_log_file())
+        max_bytes = Application.get_env(:symphony_elixir, :log_file_max_bytes, @default_max_bytes)
+        max_files = Application.get_env(:symphony_elixir, :log_file_max_files, @default_max_files)
+
+        setup_disk_handler(log_file, max_bytes, max_files)
+    end
   end
 
   defp setup_disk_handler(log_file, max_bytes, max_files) do
@@ -63,6 +69,33 @@ defmodule SymphonyElixir.LogFile do
       {:error, {:not_found, :default}} -> :ok
       {:error, _reason} -> :ok
     end
+  end
+
+  defp setup_stdout_handler do
+    :ok = remove_existing_handler()
+
+    case :logger.add_handler(:default, :logger_std_h, console_handler_config()) do
+      :ok ->
+        :ok
+
+      {:error, {:already_exist, :default}} ->
+        :ok
+
+      {:error, {:already_exists, :default}} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to configure stdout log handler: #{inspect(reason)}")
+        :ok
+    end
+  end
+
+  defp console_handler_config do
+    %{
+      level: :all,
+      formatter: {:logger_formatter, %{single_line: true}},
+      config: %{type: :standard_io}
+    }
   end
 
   defp disk_log_handler_config(path, max_bytes, max_files) do

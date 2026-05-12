@@ -78,6 +78,7 @@ If no path is passed, Symphony defaults to `./WORKFLOW.md`.
 Optional flags:
 
 - `--logs-root` tells Symphony to write logs under a different directory (default: `./log`)
+- `--log-format` selects `file` (default rotating disk handler) or `stdout` (process stream)
 - `--port` also starts the Phoenix observability service (default: disabled)
 
 The `WORKFLOW.md` file uses YAML front matter for configuration, plus a Markdown body used as the
@@ -172,6 +173,10 @@ The observability UI now runs on a minimal Phoenix stack:
 ```bash
 make all
 ```
+
+The default coverage gate is 85%. This keeps `make all` enforcing broad test
+coverage without requiring every integration adapter, runtime port path, and
+operator-facing workflow branch to be counted in the 100% unit-coverage target.
 
 Run the real external end-to-end test only when you want Symphony to create disposable Linear
 resources and launch a real `codex app-server` session:

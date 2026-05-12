@@ -7,6 +7,19 @@ This guide defines logging conventions for Symphony so Codex can diagnose failur
 - Make logs searchable by issue and session.
 - Capture enough execution context to identify root cause without reruns.
 - Keep messages stable so dashboards/alerts are reliable.
+- Support both file-routed launchd operation and stdout-streaming operation.
+
+## Routing
+
+The default log format is `file`, which configures Symphony's rotating disk
+handler under the configured logs root. This preserves the Smithy launchd
+convention of routing process streams to `~/.smithy/logs/<slug>/stdout.log` and
+`stderr.log`.
+
+Use `--log-format stdout` when an external operator should own log routing, such
+as a container runtime or process supervisor that consumes stdout/stderr
+directly. In stdout mode Symphony does not install the rotating disk log
+handler.
 
 ## Required Context Fields
 

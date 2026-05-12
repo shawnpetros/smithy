@@ -50,9 +50,7 @@ defmodule SymphonyElixir.Config.Schema do
       field(:api_key, :string)
       field(:project_slug, :string)
       field(:assignee, :string)
-      field(:active_states, {:array, :string},
-        default: ["Todo", "In Progress", "Adversarial Review", "Rework"]
-      )
+      field(:active_states, {:array, :string}, default: ["Todo", "In Progress", "Adversarial Review", "Rework"])
       field(:terminal_states, {:array, :string}, default: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"])
       field(:labels, {:array, :string}, default: [])
     end
@@ -279,6 +277,9 @@ defmodule SymphonyElixir.Config.Schema do
     import Ecto.Changeset
 
     @primary_key false
+
+    @type t :: %__MODULE__{}
+
     embedded_schema do
       field(:mode, Ecto.Enum, values: [:builder, :reviewer, :triager])
       field(:runtime, Ecto.Enum, values: [:codex, :claude_code])

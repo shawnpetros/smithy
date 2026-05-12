@@ -511,8 +511,7 @@ defmodule SymphonyElixir.Workpad do
 
   defp render_checklist(items) when is_list(items) do
     items
-    |> Enum.map(fn item -> "- [ ] " <> to_string(item) end)
-    |> Enum.join("\n")
+    |> Enum.map_join("\n", fn item -> "- [ ] " <> to_string(item) end)
     |> Kernel.<>("\n")
   end
 
@@ -520,8 +519,7 @@ defmodule SymphonyElixir.Workpad do
 
   defp render_bullets_or_placeholder(items, _placeholder) when is_list(items) do
     items
-    |> Enum.map(fn item -> "- " <> to_string(item) end)
-    |> Enum.join("\n")
+    |> Enum.map_join("\n", fn item -> "- " <> to_string(item) end)
     |> Kernel.<>("\n")
   end
 

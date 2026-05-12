@@ -11,13 +11,15 @@ defmodule SymphonyElixir.CLI do
 
   alias SymphonyElixir.LogFile
 
-  @switches [logs_root: :string, port: :integer]
+  @switches [logs_root: :string, log_format: :string, port: :integer]
+  @log_formats ["file", "stdout"]
 
   @type ensure_started_result :: {:ok, [atom()]} | {:error, term()}
   @type deps :: %{
           file_regular?: (String.t() -> boolean()),
           set_workflow_file_path: (String.t() -> :ok | {:error, term()}),
           set_logs_root: (String.t() -> :ok | {:error, term()}),
+          set_log_format: (atom() -> :ok | {:error, term()}),
           set_server_port_override: (non_neg_integer() | nil -> :ok | {:error, term()}),
           ensure_all_started: (-> ensure_started_result())
         }
@@ -38,13 +40,15 @@ defmodule SymphonyElixir.CLI do
   def evaluate(args, deps \\ runtime_deps()) do
     case OptionParser.parse(args, strict: @switches) do
       {opts, [], []} ->
-        with :ok <- maybe_set_logs_root(opts, deps),
+        with :ok <- maybe_set_log_format(opts, deps),
+             :ok <- maybe_set_logs_root(opts, deps),
              :ok <- maybe_set_server_port(opts, deps) do
           run(Path.expand("WORKFLOW.md"), deps)
         end
 
       {opts, [workflow_path], []} ->
-        with :ok <- maybe_set_logs_root(opts, deps),
+        with :ok <- maybe_set_log_format(opts, deps),
+             :ok <- maybe_set_logs_root(opts, deps),
              :ok <- maybe_set_server_port(opts, deps) do
           run(workflow_path, deps)
         end
@@ -75,7 +79,7 @@ defmodule SymphonyElixir.CLI do
 
   @spec usage_message() :: String.t()
   defp usage_message do
-    "Usage: symphony [--logs-root <path>] [--port <port>] [path-to-WORKFLOW.md]"
+    "Usage: symphony [--logs-root <path>] [--log-format file|stdout] [--port <port>] [path-to-WORKFLOW.md]"
   end
 
   @spec runtime_deps() :: deps()
@@ -84,9 +88,31 @@ defmodule SymphonyElixir.CLI do
       file_regular?: &File.regular?/1,
       set_workflow_file_path: &SymphonyElixir.Workflow.set_workflow_file_path/1,
       set_logs_root: &set_logs_root/1,
+      set_log_format: &set_log_format/1,
       set_server_port_override: &set_server_port_override/1,
       ensure_all_started: fn -> Application.ensure_all_started(:symphony_elixir) end
     }
+  end
+
+  defp maybe_set_log_format(opts, deps) do
+    case Keyword.get_values(opts, :log_format) do
+      [] ->
+        :ok
+
+      values ->
+        log_format = values |> List.last() |> String.trim()
+
+        if log_format in @log_formats do
+          :ok = deps.set_log_format.(String.to_existing_atom(log_format))
+        else
+          {:error, usage_message()}
+        end
+    end
+  end
+
+  defp set_log_format(log_format) when log_format in [:file, :stdout] do
+    Application.put_env(:symphony_elixir, :log_format, log_format)
+    :ok
   end
 
   defp maybe_set_logs_root(opts, deps) do

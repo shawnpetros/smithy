@@ -12,6 +12,7 @@ defmodule SymphonyElixir.CLITest do
       file_regular?: fn path -> Path.basename(path) == "WORKFLOW.md" end,
       set_workflow_file_path: fn _path -> :ok end,
       set_logs_root: fn _path -> :ok end,
+      set_log_format: fn _format -> :ok end,
       set_server_port_override: fn _port -> :ok end,
       ensure_all_started: fn -> {:ok, [:symphony_elixir]} end
     }
@@ -34,6 +35,7 @@ defmodule SymphonyElixir.CLITest do
         :ok
       end,
       set_logs_root: fn _path -> :ok end,
+      set_log_format: fn _format -> :ok end,
       set_server_port_override: fn _port -> :ok end,
       ensure_all_started: fn -> {:ok, [:symphony_elixir]} end
     }
@@ -53,6 +55,7 @@ defmodule SymphonyElixir.CLITest do
         send(parent, {:logs_root, path})
         :ok
       end,
+      set_log_format: fn _format -> :ok end,
       set_server_port_override: fn _port -> :ok end,
       ensure_all_started: fn -> {:ok, [:symphony_elixir]} end
     }
@@ -62,11 +65,45 @@ defmodule SymphonyElixir.CLITest do
     assert expanded_path == Path.expand("tmp/custom-logs")
   end
 
+  test "accepts --log-format stdout and passes it to runtime deps" do
+    parent = self()
+
+    deps = %{
+      file_regular?: fn _path -> true end,
+      set_workflow_file_path: fn _path -> :ok end,
+      set_logs_root: fn _path -> :ok end,
+      set_log_format: fn format ->
+        send(parent, {:log_format, format})
+        :ok
+      end,
+      set_server_port_override: fn _port -> :ok end,
+      ensure_all_started: fn -> {:ok, [:symphony_elixir]} end
+    }
+
+    assert :ok = CLI.evaluate(["--log-format", "stdout", "WORKFLOW.md"], deps)
+    assert_received {:log_format, :stdout}
+  end
+
+  test "rejects unknown --log-format values" do
+    deps = %{
+      file_regular?: fn _path -> true end,
+      set_workflow_file_path: fn _path -> :ok end,
+      set_logs_root: fn _path -> :ok end,
+      set_log_format: fn _format -> :ok end,
+      set_server_port_override: fn _port -> :ok end,
+      ensure_all_started: fn -> {:ok, [:symphony_elixir]} end
+    }
+
+    assert {:error, message} = CLI.evaluate(["--log-format", "json", "WORKFLOW.md"], deps)
+    assert message =~ "--log-format file|stdout"
+  end
+
   test "returns not found when workflow file does not exist" do
     deps = %{
       file_regular?: fn _path -> false end,
       set_workflow_file_path: fn _path -> :ok end,
       set_logs_root: fn _path -> :ok end,
+      set_log_format: fn _format -> :ok end,
       set_server_port_override: fn _port -> :ok end,
       ensure_all_started: fn -> {:ok, [:symphony_elixir]} end
     }
@@ -80,6 +117,7 @@ defmodule SymphonyElixir.CLITest do
       file_regular?: fn _path -> true end,
       set_workflow_file_path: fn _path -> :ok end,
       set_logs_root: fn _path -> :ok end,
+      set_log_format: fn _format -> :ok end,
       set_server_port_override: fn _port -> :ok end,
       ensure_all_started: fn -> {:error, :boom} end
     }
@@ -94,6 +132,7 @@ defmodule SymphonyElixir.CLITest do
       file_regular?: fn _path -> true end,
       set_workflow_file_path: fn _path -> :ok end,
       set_logs_root: fn _path -> :ok end,
+      set_log_format: fn _format -> :ok end,
       set_server_port_override: fn _port -> :ok end,
       ensure_all_started: fn -> {:ok, [:symphony_elixir]} end
     }

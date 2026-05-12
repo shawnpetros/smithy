@@ -75,8 +75,7 @@ defmodule SymphonyElixir.WorkpadTest do
 
             %{
               state
-              | comments_by_issue:
-                  Map.put(state.comments_by_issue, to_string(issue_id), existing ++ [new_comment])
+              | comments_by_issue: Map.put(state.comments_by_issue, to_string(issue_id), existing ++ [new_comment])
             }
           end)
 
@@ -97,20 +96,7 @@ defmodule SymphonyElixir.WorkpadTest do
       case Agent.get(pid, fn state -> Map.get(state, :update_response) end) do
         nil ->
           Agent.update(pid, fn state ->
-            updated =
-              state.comments_by_issue
-              |> Enum.map(fn {issue_id, comments} ->
-                new_comments =
-                  Enum.map(comments, fn
-                    %{id: ^comment_id} = c -> %{c | body: body}
-                    other -> other
-                  end)
-
-                {issue_id, new_comments}
-              end)
-              |> Map.new()
-
-            %{state | comments_by_issue: updated}
+            %{state | comments_by_issue: replace_comment_body(state.comments_by_issue, comment_id, body)}
           end)
 
           {:ok, comment_id}
@@ -125,6 +111,21 @@ defmodule SymphonyElixir.WorkpadTest do
     def install(pid) do
       Process.put(__MODULE__, pid)
       pid
+    end
+
+    defp replace_comment_body(comments_by_issue, comment_id, body) do
+      comments_by_issue
+      |> Enum.map(fn {issue_id, comments} ->
+        {issue_id, replace_matching_comment(comments, comment_id, body)}
+      end)
+      |> Map.new()
+    end
+
+    defp replace_matching_comment(comments, comment_id, body) do
+      Enum.map(comments, fn
+        %{id: ^comment_id} = comment -> %{comment | body: body}
+        other -> other
+      end)
     end
 
     defp current_pid do

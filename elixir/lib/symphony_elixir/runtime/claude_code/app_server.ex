@@ -76,8 +76,7 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.AppServer do
         persona_path: Keyword.get(opts, :persona_path),
         tier: Keyword.get(opts, :tier, :sonnet),
         mcp_config_path: Keyword.get(opts, :mcp_config_path),
-        disallowed_tools:
-          Keyword.get(opts, :disallowed_tools, Argv.default_disallowed_tools()),
+        disallowed_tools: Keyword.get(opts, :disallowed_tools, Argv.default_disallowed_tools()),
         claude_bin: resolve_claude_bin(Keyword.get(opts, :claude_bin)),
         accumulator: ""
       }
@@ -92,7 +91,7 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.AppServer do
   def run_turn(session, prompt, issue, opts \\ [])
       when is_map(session) and is_binary(prompt) and is_list(opts) do
     on_message = Keyword.get(opts, :on_message, &default_on_message/1)
-    timeout_ms = Keyword.get(opts, :turn_timeout_ms, @default_turn_timeout_ms)
+    timeout_ms = Keyword.get(opts, :turn_timeout_ms, default_turn_timeout_ms())
     max_budget = Keyword.get(opts, :max_budget_usd)
 
     argv = build_argv(session, max_budget)
@@ -255,7 +254,24 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.AppServer do
     end
   end
 
-  defp close_port(_), do: :ok
+  @doc false
+  @spec default_turn_timeout_ms() :: pos_integer()
+  def default_turn_timeout_ms do
+    case System.get_env("SYMPHONY_CLAUDE_CODE_TURN_TIMEOUT_MS") do
+      value when is_binary(value) ->
+        parse_positive_integer(value, @default_turn_timeout_ms)
+
+      _ ->
+        @default_turn_timeout_ms
+    end
+  end
+
+  defp parse_positive_integer(value, fallback) do
+    case Integer.parse(String.trim(value)) do
+      {parsed, ""} when parsed > 0 -> parsed
+      _ -> fallback
+    end
+  end
 
   # ----- internal: receive loop -----
 
@@ -286,6 +302,8 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.AppServer do
   # Public-ish helper so tests can simulate the chunk path without a real port.
   # Not part of the @callback contract; mark with @doc false to hide from docs.
   @doc false
+  @spec process_chunk(session(), String.t(), (term() -> term()), pos_integer(), String.t() | nil, non_neg_integer()) ::
+          {:ok, map()} | {:error, term()}
   def process_chunk(session, chunk, on_message, timeout_ms, captured_session_id, event_count) do
     {complete_lines, remainder} = split_lines(session.accumulator <> chunk)
 

@@ -690,24 +690,18 @@ defmodule SymphonyElixir.Orchestrator do
   #   * `Adversarial Review` + at least one reviewer configured -> `:reviewer`
   #     with the first reviewer slot (panel review is forward-compat; v1 honors
   #     only `hd(reviewers)`).
-  #   * `Todo` + a triager configured                          -> `:triager`.
-  #     The triager only fires while the issue is still in Todo; once it
+  #   * Queue state + a triager configured                      -> `:triager`.
+  #     The triager only fires while the issue is still queued; once it
   #     transitions to In Progress, the orchestrator picks builder on the
   #     next polling cycle and the triager never re-fires.
   #   * Everything else (including Adversarial Review with no reviewers, and
-  #     Todo with no triager)                                  -> `:builder`.
-  #   * No agents block at all                                 -> `{:builder, nil}`
-  #     (classic Symphony fallback).
+  #     queued issues with no triager)                          -> `:builder`.
   @spec select_agent_config_for_issue(Issue.t()) ::
           {atom(), SymphonyElixir.Config.Schema.AgentConfig.t() | nil}
   defp select_agent_config_for_issue(%Issue{state: state}) do
     agents = Config.settings!().agents
 
     cond do
-      is_nil(agents) ->
-        # Workflow has no agents block; classic Symphony behavior.
-        {:builder, nil}
-
       adversarial_review_state?(state) and has_reviewer?(agents) ->
         {:reviewer, List.first(agents.reviewers)}
 
