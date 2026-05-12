@@ -39,6 +39,12 @@ defmodule Smithy.Supervisor do
 
   @doc """
   Renders the plist XML for a registered repo. Pure: no filesystem effect.
+
+  The plist sets EnvironmentVariables.PATH so launchd can find `escript`
+  (needed by Symphony's escript shebang) plus any other binaries the
+  workflow hooks may shell out to. The path captured here is the PATH
+  active when `smithy add-repo` was run, prefixed onto the standard
+  launchd PATH.
   """
   @spec render_plist(Config.repo(), Config.t()) :: String.t()
   def render_plist(repo, config) do
@@ -49,11 +55,27 @@ defmodule Smithy.Supervisor do
         workflow: repo.workflow,
         port: repo.port,
         logs_dir: logs_dir(repo.slug),
-        symphony_binary: config.symphony_binary
+        symphony_binary: config.symphony_binary,
+        path_env: path_env_for_launchd()
       }
     ]
 
     EEx.eval_file(template_path(), assigns)
+  end
+
+  @doc false
+  # Composes the PATH value baked into the generated plist's
+  # EnvironmentVariables block. Captures the operator's current PATH at
+  # registration time and prepends it onto the launchd default, so escript,
+  # mise, git, gh, and friends resolve in the daemon's environment.
+  @spec path_env_for_launchd() :: String.t()
+  def path_env_for_launchd do
+    base = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    operator = System.get_env("PATH") || ""
+
+    [operator, base]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join(":")
   end
 
   @doc """

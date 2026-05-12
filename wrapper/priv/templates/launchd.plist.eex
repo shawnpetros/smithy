@@ -13,6 +13,11 @@
     <string><%= repo.port %></string>
     <string><%= Path.join(repo.path, repo.workflow) %></string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string><%= repo.path_env %></string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
