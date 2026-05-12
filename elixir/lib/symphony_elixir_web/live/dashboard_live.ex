@@ -139,7 +139,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
           </div>
 
           <% cards = rate_limit_cards(@payload.rate_limits) %>
-          <%= if cards == :none do %>
+          <%= if cards in [:none, []] do %>
             <p class="muted empty-state">n/a</p>
           <% else %>
             <div class="rate-limit-grid">
@@ -252,9 +252,9 @@ defmodule SymphonyElixirWeb.DashboardLive do
                             <% else %>
                               <%= for event <- Map.get(@event_history, entry.issue_identifier, []) do %>
                                 <div class={"event-history-row #{event_type_class(event.event)}"}>
-                                  <span class="event-history-time mono numeric"><%= event.at || "&mdash;" %></span>
-                                  <span class="event-history-type"><%= event.event || "&mdash;" %></span>
-                                  <span class="event-history-msg"><%= event.message || "&mdash;" %></span>
+                                  <span class="event-history-time mono numeric"><%= event.at || "-" %></span>
+                                  <span class="event-history-type"><%= event.event || "-" %></span>
+                                  <span class="event-history-msg"><%= event.message || "-" %></span>
                                 </div>
                               <% end %>
                             <% end %>
