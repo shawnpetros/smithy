@@ -55,6 +55,7 @@ defmodule SymphonyElixir.Modes.Triager do
   require Logger
 
   alias SymphonyElixir.Handoff.Triage
+  alias SymphonyElixir.Modes.{Dispatch, Outcomes}
   alias SymphonyElixir.Personas.Persona
   alias SymphonyElixir.Runtime
 
@@ -64,6 +65,23 @@ defmodule SymphonyElixir.Modes.Triager do
           {:proceed, Triage.t()}
           | {:flag, Triage.t()}
           | {:blocked, reason :: String.t()}
+
+  @doc false
+  @spec run_mode(issue(), agent_config(), keyword(), Dispatch.worker_host()) :: :ok
+  def run_mode(issue, agent_config, opts, worker_host) do
+    triager_mod = Keyword.get(opts, :triager_mod, __MODULE__)
+
+    Dispatch.run_outcome_mode(
+      :triager,
+      issue,
+      agent_config,
+      opts,
+      worker_host,
+      triager_mod,
+      &Outcomes.handle_triager_outcome/3,
+      &turn_outcome/1
+    )
+  end
 
   # Same posture as Modes.Reviewer: deny every Linear write tool, keep
   # Write/Edit available because the triager needs to emit TRIAGE.md.
@@ -105,6 +123,11 @@ defmodule SymphonyElixir.Modes.Triager do
       classify_triage(workspace, opts)
     end
   end
+
+  defp turn_outcome({:proceed, _}), do: :success
+  defp turn_outcome({:flag, _}), do: :success
+  defp turn_outcome({:blocked, _}), do: :error
+  defp turn_outcome(_), do: :error
 
   @doc """
   Map the triager's outcome to the next Linear state name.

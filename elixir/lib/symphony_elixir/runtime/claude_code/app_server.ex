@@ -76,8 +76,7 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.AppServer do
         persona_path: Keyword.get(opts, :persona_path),
         tier: Keyword.get(opts, :tier, :sonnet),
         mcp_config_path: Keyword.get(opts, :mcp_config_path),
-        disallowed_tools:
-          Keyword.get(opts, :disallowed_tools, Argv.default_disallowed_tools()),
+        disallowed_tools: Keyword.get(opts, :disallowed_tools, Argv.default_disallowed_tools()),
         claude_bin: resolve_claude_bin(Keyword.get(opts, :claude_bin)),
         accumulator: ""
       }
@@ -286,6 +285,14 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.AppServer do
   # Public-ish helper so tests can simulate the chunk path without a real port.
   # Not part of the @callback contract; mark with @doc false to hide from docs.
   @doc false
+  @spec process_chunk(
+          session(),
+          String.t(),
+          (term() -> term()),
+          timeout(),
+          String.t() | nil,
+          non_neg_integer()
+        ) :: {:ok, map()} | {:error, term()}
   def process_chunk(session, chunk, on_message, timeout_ms, captured_session_id, event_count) do
     {complete_lines, remainder} = split_lines(session.accumulator <> chunk)
 

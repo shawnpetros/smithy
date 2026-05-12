@@ -53,6 +53,7 @@ defmodule SymphonyElixir.Modes.Reviewer do
   require Logger
 
   alias SymphonyElixir.Handoff.Review
+  alias SymphonyElixir.Modes.{Dispatch, Outcomes}
   alias SymphonyElixir.Personas.Persona
   alias SymphonyElixir.Runtime
 
@@ -62,6 +63,23 @@ defmodule SymphonyElixir.Modes.Reviewer do
           {:pass, Review.t()}
           | {:fail, Review.t()}
           | {:blocked, reason :: String.t()}
+
+  @doc false
+  @spec run_mode(issue(), agent_config(), keyword(), Dispatch.worker_host()) :: :ok
+  def run_mode(issue, agent_config, opts, worker_host) do
+    reviewer_mod = Keyword.get(opts, :reviewer_mod, __MODULE__)
+
+    Dispatch.run_outcome_mode(
+      :reviewer,
+      issue,
+      agent_config,
+      opts,
+      worker_host,
+      reviewer_mod,
+      &Outcomes.handle_reviewer_outcome/3,
+      &turn_outcome/1
+    )
+  end
 
   # v1 keeps Write allowed so the reviewer can emit REVIEW.md. Persona prompt
   # constrains usage to "REVIEW.md only" via the body text. Future hardening
@@ -104,6 +122,11 @@ defmodule SymphonyElixir.Modes.Reviewer do
       classify_review(workspace, opts)
     end
   end
+
+  defp turn_outcome({:pass, _}), do: :success
+  defp turn_outcome({:fail, _}), do: :success
+  defp turn_outcome({:blocked, _}), do: :error
+  defp turn_outcome(_), do: :error
 
   @doc """
   Map the reviewer's outcome to the next Linear state name.

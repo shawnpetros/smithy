@@ -52,15 +52,25 @@ defmodule SymphonyElixir.Telemetry do
 
     case Process.whereis(__MODULE__) do
       nil ->
-        Logger.warning(
-          "Telemetry GenServer not running; dropping event #{inspect(kind)} ticket=#{inspect(event.ticket)}"
-        )
+        Logger.warning("Telemetry GenServer not running; dropping event #{inspect(kind)} ticket=#{inspect(event.ticket)}")
 
         :ok
 
       pid when is_pid(pid) ->
         GenServer.cast(pid, {:write, event})
     end
+  end
+
+  @doc false
+  @spec safe_emit(module(), Event.event_kind(), keyword()) :: :ok
+  def safe_emit(telemetry_mod, kind, opts) do
+    telemetry_mod.emit(kind, opts)
+    :ok
+  rescue
+    exception ->
+      Logger.warning("Telemetry emit failed kind=#{inspect(kind)} reason=#{Exception.message(exception)}")
+
+      :ok
   end
 
   @doc """
@@ -136,9 +146,7 @@ defmodule SymphonyElixir.Telemetry do
           %{state | written: state.written + 1}
 
         {:error, reason} ->
-          Logger.error(
-            "Telemetry write failed event=#{inspect(event.event)} reason=#{inspect(reason)}"
-          )
+          Logger.error("Telemetry write failed event=#{inspect(event.event)} reason=#{inspect(reason)}")
 
           %{state | dropped: state.dropped + 1}
       end

@@ -75,8 +75,7 @@ defmodule SymphonyElixir.WorkpadTest do
 
             %{
               state
-              | comments_by_issue:
-                  Map.put(state.comments_by_issue, to_string(issue_id), existing ++ [new_comment])
+              | comments_by_issue: Map.put(state.comments_by_issue, to_string(issue_id), existing ++ [new_comment])
             }
           end)
 
@@ -96,22 +95,7 @@ defmodule SymphonyElixir.WorkpadTest do
 
       case Agent.get(pid, fn state -> Map.get(state, :update_response) end) do
         nil ->
-          Agent.update(pid, fn state ->
-            updated =
-              state.comments_by_issue
-              |> Enum.map(fn {issue_id, comments} ->
-                new_comments =
-                  Enum.map(comments, fn
-                    %{id: ^comment_id} = c -> %{c | body: body}
-                    other -> other
-                  end)
-
-                {issue_id, new_comments}
-              end)
-              |> Map.new()
-
-            %{state | comments_by_issue: updated}
-          end)
+          Agent.update(pid, &update_comment_in_state(&1, comment_id, body))
 
           {:ok, comment_id}
 
@@ -119,6 +103,21 @@ defmodule SymphonyElixir.WorkpadTest do
           response
       end
     end
+
+    defp update_comment_in_state(state, comment_id, body) do
+      updated =
+        Map.new(state.comments_by_issue, fn {issue_id, comments} ->
+          {issue_id, Enum.map(comments, &replace_comment_body(&1, comment_id, body))}
+        end)
+
+      %{state | comments_by_issue: updated}
+    end
+
+    defp replace_comment_body(%{id: id} = comment, target_id, body) when id == target_id do
+      %{comment | body: body}
+    end
+
+    defp replace_comment_body(comment, _target_id, _body), do: comment
 
     # The stub stores its Agent pid in the process dictionary so functions can
     # locate it without each call having to thread it through. Set per-test.
