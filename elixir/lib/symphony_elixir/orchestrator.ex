@@ -340,6 +340,19 @@ defmodule SymphonyElixir.Orchestrator do
     select_agent_config_for_issue(issue)
   end
 
+  @doc false
+  @spec choose_issues_for_test([Issue.t()], State.t()) :: [Issue.t()]
+  def choose_issues_for_test(issues, %State{} = state) when is_list(issues) do
+    active_states = active_state_set()
+    terminal_states = terminal_state_set()
+
+    issues
+    |> sort_issues_for_dispatch()
+    |> Enum.filter(fn issue ->
+      should_dispatch_issue?(issue, state, active_states, terminal_states)
+    end)
+  end
+
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
 
   defp reconcile_running_issue_states([issue | rest], state, active_states, terminal_states) do

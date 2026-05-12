@@ -584,6 +584,31 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert skipped_issue.blocked_by == [%{id: "blocker-3", identifier: "MT-1006", state: "In Progress"}]
   end
 
+  test "blockedBy gating lifecycle: B stays in Todo while A is active, becomes dispatchable when A reaches terminal" do
+    state = %Orchestrator.State{
+      max_concurrent_agents: 3,
+      running: %{},
+      claimed: MapSet.new(),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    issue_b = %Issue{
+      id: "b-id",
+      identifier: "MT-B",
+      title: "Dependent work",
+      state: "Todo",
+      blocked_by: [%{id: "a-id", identifier: "MT-A", state: "In Progress"}]
+    }
+
+    # Poll cycle 1: A is active (In Progress) - B is excluded from choose_issues.
+    assert Orchestrator.choose_issues_for_test([issue_b], state) == []
+
+    # Poll cycle 2: A reaches terminal (Done) - B passes through choose_issues.
+    issue_b_unblocked = %{issue_b | blocked_by: [%{id: "a-id", identifier: "MT-A", state: "Done"}]}
+    assert [%Issue{identifier: "MT-B"}] = Orchestrator.choose_issues_for_test([issue_b_unblocked], state)
+  end
+
   test "workspace remove returns error information for missing directory" do
     random_path =
       Path.join(
