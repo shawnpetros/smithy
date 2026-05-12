@@ -372,7 +372,15 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.AppServerTest do
     fn event -> Agent.update(pid, fn acc -> acc ++ [event] end) end
   end
 
+  # Returns only the parsed events. Drops the per-chunk :bytes_received
+  # heartbeats (added in PER-195 to feed the stall watchdog) since the
+  # parsed-event tests pre-date that signal and assert on position.
   defp events_collected({:ok, pid}) do
-    Agent.get(pid, & &1)
+    pid
+    |> Agent.get(& &1)
+    |> Enum.reject(fn
+      %{event: :bytes_received} -> true
+      _ -> false
+    end)
   end
 end

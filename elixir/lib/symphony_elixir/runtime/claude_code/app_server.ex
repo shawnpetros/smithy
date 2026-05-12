@@ -301,6 +301,15 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.AppServer do
            }}
           | {:error, term()}
   def process_chunk(session, chunk, on_message, timeout_ms, captured_session_id, event_count) do
+    # Byte-level heartbeat: any bytes arriving from claude means the subprocess
+    # is alive and emitting. Refresh the orchestrator's stall timer BEFORE
+    # parsing, so long thinking blocks (content_block_delta chunks that
+    # EventParser doesn't recognize as canonical events) still keep the
+    # session warm. Without this, sessions doing legitimate work but emitting
+    # only deltas trip the stall watchdog (observed PER-191 and PER-190
+    # 2026-05-12). See PER-195.
+    emit(on_message, %{event: :bytes_received, timestamp: DateTime.utc_now(), bytes: byte_size(chunk)})
+
     {complete_lines, remainder} = split_lines(session.accumulator <> chunk)
 
     case process_lines(complete_lines, on_message, captured_session_id, event_count) do
