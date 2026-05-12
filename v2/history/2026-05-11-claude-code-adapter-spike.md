@@ -109,19 +109,52 @@ Full Symphony suite:
 
 The 2 skipped are pre-existing skips, not introduced by this spike.
 
-### 5. The hook-injection cost trap
+### 5. The hook-injection cost trap (and the right fix, per smithy-v1 PER-44)
 
-The first capture (without `--bare`) cost $0.19 for a trivial echo prompt because Shawn's personal CLAUDE.md `SessionStart` hooks injected 29,753 input tokens of context (memory, persona setup, etc.) into the session.
+The first capture (without `--setting-sources` scoping) cost $0.19 for a trivial echo prompt because Shawn's personal CLAUDE.md `SessionStart` hooks injected 29,753 input tokens of context (memory, persona setup, etc.) into the session.
 
-**Implication:** when Symphony spawns Claude Code as a worker, it MUST use `--bare` (or otherwise scope settings) to avoid pulling in the operator's personal context. Otherwise every Claude-side run pays a ~$0.20 cache-creation tax per session-start, on top of the actual ticket work.
+**Initial wrong guess in this spike:** use `--bare`, ship an `apiKeyHelper` settings file.
 
-This is a non-trivial operational gotcha. `--bare` does the right thing but also disables OAuth/keychain auth, which means Symphony either:
+**Right answer, per smithy-v1's PER-44 worker:** `--setting-sources project,local`.
 
-- Sets `ANTHROPIC_API_KEY` env var before spawning, OR
-- Uses `--settings <symphony-settings.json>` with an `apiKeyHelper` entry, OR
-- Skips `--bare` and accepts the cost.
+```
+claude -p \
+  --setting-sources project,local \
+  --dangerously-skip-permissions \
+  --model claude-{opus-4-7|sonnet-4-6|haiku-4-5} \
+  --disallowedTools "mcp__linear__save_issue mcp__linear__save_comment ..." \
+  --output-format stream-json \
+  --verbose
+```
 
-Recommendation: ship Symphony with a `claude_runtime.settings.json` template that operators populate with an apiKeyHelper. Document in the daemon-mode ticket.
+Settings sources are orthogonal to auth. **OAuth and keychain credentials, plus user-scope MCP server configs, live OUTSIDE the `settings` system.** They persist across all `--setting-sources` values. Dropping the `user` scope skips:
+
+- The operator's `~/.claude/settings.json` (which holds the SessionStart hooks Shawn uses for vault sync, wrapup digests, deaiify, etc.)
+- The operator's user-scope CLAUDE.md (which holds the Argyle persona setup, brand voice rules, project heuristics)
+- The operator's user-scope plugin registrations (superpowers, vercel, etc.)
+
+What remains:
+
+- OAuth or keychain auth (works as if interactive)
+- Linear / GitHub / other MCP servers (still connect)
+- Project-scope settings (target repo's `.claude/settings.json` if present)
+- Local-scope settings (workspace overrides if present)
+
+For Codex, the symmetric flag is `--ignore-user-config` (per smithy-v1 PER-46). Drops `~/.codex/config.toml` while CODEX_HOME auth persists. The orchestrator re-adds the Linear MCP server inline via `-c mcp_servers.linear.url=...` since user-scope MCP config is dropped along with user prompts/rules.
+
+**Recommendation:** Symphony's ClaudeCode adapter always passes `--setting-sources project,local`. Codex adapter always passes `--ignore-user-config` with explicit MCP re-adds for shared servers. No `apiKeyHelper` plumbing needed; no `ANTHROPIC_API_KEY` env var needed.
+
+### 5a. Universal AGENTS.md nudge (Shawn's follow-up idea)
+
+Both Codex and Claude Code read project-root `AGENTS.md` (Codex natively; Claude Code via interop). Symphony's `smithy bootstrap <repo>` flow (or a manual setup step in v1) ships a minimal AGENTS.md that nudges both runtimes consistently:
+
+- Workpad ownership conventions
+- The structured RESULT.md / REVIEW.md handoff contract
+- Repo-specific test commands and validation gates
+- The "do not call Linear write tools" rule (defense-in-depth on top of `--disallowedTools` / Codex `disabled_tools`)
+- Branch naming, commit message conventions
+
+This keeps runtime-specific prompts thin (each runtime gets only what it can't get from AGENTS.md) and gives a single source of truth for "how Smithy expects agents to behave in this repo." Worth a separate brick in v2.1.
 
 ### 6. Auth-failure path is parseable
 
@@ -165,9 +198,10 @@ Effort estimate: 400-600 LoC for the adapter, 200-300 LoC for tests, 1-2 days of
 
 ## Open questions raised by the spike
 
-1. **Should `--bare` be the default in Symphony, or operator-opt-in?** Default-bare prevents the hook-injection cost trap but requires operators to set up explicit auth. I lean default-bare with a config flag to disable for unusual setups.
+1. ~~Should `--bare` be the default?~~ **Resolved:** `--setting-sources project,local` per smithy-v1 PER-44. OAuth + MCP stay active because they live outside settings. No `apiKeyHelper` plumbing needed.
 2. **Should we use `--continue <session_id>` for multi-turn, or `--input-format stream-json` to keep the port alive?** Continue-by-session-id is simpler but each turn pays a small startup cost. Streaming input is more efficient but more complex. I lean continue-by-session-id; the startup cost is negligible vs the model call.
 3. **How do tool calls round-trip?** Codex's app-server has a native tool-call protocol. Claude Code's headless mode emits `tool_use` content blocks; the orchestrator needs to execute them and pass results back via `--input-format stream-json`. This is the most complex piece of the adapter and warrants a follow-up spike before the brick lands.
+4. **Universal AGENTS.md template.** Per §5a, Symphony should ship a minimal AGENTS.md per repo that both runtimes read. Define the template content as part of v2.1 spec.
 
 ## Decision log
 
