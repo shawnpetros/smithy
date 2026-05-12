@@ -97,7 +97,10 @@ defmodule SymphonyElixir.AgentRunner do
   end
 
   defp run_builder_mode(issue, codex_update_recipient, opts, worker_host) do
-    case run_on_worker_host(issue, codex_update_recipient, opts, worker_host) do
+    agent_config = Keyword.get(opts, :agent_config)
+    runtime = (agent_config && agent_config.runtime) || :codex
+
+    case run_on_worker_host(issue, codex_update_recipient, opts, worker_host, runtime, agent_config) do
       :ok ->
         :ok
 
@@ -363,8 +366,8 @@ defmodule SymphonyElixir.AgentRunner do
     end
   end
 
-  defp run_on_worker_host(issue, codex_update_recipient, opts, worker_host) do
-    Logger.info("Starting worker attempt for #{issue_context(issue)} worker_host=#{worker_host_for_log(worker_host)}")
+  defp run_on_worker_host(issue, codex_update_recipient, opts, worker_host, runtime, agent_config) do
+    Logger.info("Starting worker attempt for #{issue_context(issue)} runtime=#{runtime} worker_host=#{worker_host_for_log(worker_host)}")
 
     case Workspace.create_for_issue(issue, worker_host) do
       {:ok, workspace} ->
@@ -372,7 +375,13 @@ defmodule SymphonyElixir.AgentRunner do
 
         try do
           with :ok <- Workspace.run_before_run_hook(workspace, issue, worker_host) do
-            run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host)
+            case runtime do
+              :claude_code ->
+                run_claude_turns(workspace, issue, codex_update_recipient, opts, worker_host, agent_config)
+
+              _ ->
+                run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host)
+            end
           end
         after
           Workspace.run_after_run_hook(workspace, issue, worker_host)
@@ -514,6 +523,103 @@ defmodule SymphonyElixir.AgentRunner do
       end
     end
   end
+
+  # Claude Code builder turns: mirrors run_codex_turns but uses the Claude Code
+  # AppServer adapter. Multi-turn continuity via --continue <session_id> threaded
+  # across run_turn calls. Each turn is one `claude --print` invocation; the
+  # adapter handles the session bookkeeping.
+  defp run_claude_turns(workspace, issue, recipient, opts, worker_host, agent_config) do
+    alias SymphonyElixir.Runtime.ClaudeCode.AppServer, as: ClaudeAppServer
+
+    max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
+    issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
+    tier = (agent_config && agent_config.tier) || "sonnet"
+
+    session_opts = [
+      worker_host: worker_host,
+      tier: claude_tier_atom(tier),
+      mode: :builder
+    ]
+
+    with {:ok, session} <- ClaudeAppServer.start_session(workspace, session_opts) do
+      try do
+        do_run_claude_turns(session, workspace, issue, recipient, opts, issue_state_fetcher, 1, max_turns)
+      after
+        ClaudeAppServer.stop_session(session)
+      end
+    end
+  end
+
+  defp do_run_claude_turns(session, workspace, issue, recipient, opts, issue_state_fetcher, turn_number, max_turns) do
+    alias SymphonyElixir.Runtime.ClaudeCode.AppServer, as: ClaudeAppServer
+
+    prompt = build_turn_prompt(issue, opts, turn_number, max_turns)
+    run_id = current_run_id()
+
+    safe_emit_pdict(:turn_start,
+      ticket: issue.identifier,
+      mode: :builder,
+      runtime: :claude_code,
+      turn_number: turn_number,
+      run_id: run_id
+    )
+
+    turn_started_at = System.monotonic_time(:millisecond)
+    turn_result = ClaudeAppServer.run_turn(session, prompt, issue, on_message: codex_message_handler(recipient, issue))
+    duration_ms = System.monotonic_time(:millisecond) - turn_started_at
+
+    case turn_result do
+      {:ok, summary} ->
+        safe_emit_pdict(:turn_end,
+          ticket: issue.identifier,
+          mode: :builder,
+          runtime: :claude_code,
+          turn_number: turn_number,
+          duration_ms: duration_ms,
+          outcome: :success,
+          run_id: run_id
+        )
+
+        Logger.info("Completed Claude builder turn for #{issue_context(issue)} session_id=#{summary[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
+
+        case continue_with_issue?(issue, issue_state_fetcher) do
+          {:continue, refreshed_issue} when turn_number < max_turns ->
+            do_run_claude_turns(session, workspace, refreshed_issue, recipient, opts, issue_state_fetcher, turn_number + 1, max_turns)
+
+          {:continue, _} ->
+            Logger.info("Reached agent.max_turns for #{issue_context(issue)} (claude) with issue still active; returning control to orchestrator")
+            :ok
+
+          {:done, _} ->
+            :ok
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        safe_emit_pdict(:turn_end,
+          ticket: issue.identifier,
+          mode: :builder,
+          runtime: :claude_code,
+          turn_number: turn_number,
+          duration_ms: duration_ms,
+          outcome: :error,
+          error: inspect(reason),
+          run_id: run_id
+        )
+
+        {:error, reason}
+    end
+  end
+
+  defp claude_tier_atom("opus"), do: :opus
+  defp claude_tier_atom("sonnet"), do: :sonnet
+  defp claude_tier_atom("haiku"), do: :haiku
+  defp claude_tier_atom(:opus), do: :opus
+  defp claude_tier_atom(:sonnet), do: :sonnet
+  defp claude_tier_atom(:haiku), do: :haiku
+  defp claude_tier_atom(_), do: :sonnet
 
   defp build_turn_prompt(issue, opts, 1, _max_turns), do: PromptBuilder.build_prompt(issue, opts)
 

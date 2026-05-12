@@ -29,7 +29,7 @@ hooks:
   before_remove: |
     cd elixir && mise exec -- mix workspace.before_remove
 agent:
-  max_concurrent_agents: 10
+  max_concurrent_agents: 3
   max_turns: 20
 codex:
   command: codex --config shell_environment_policy.inherit=all --config model_reasoning_effort=xhigh app-server
@@ -40,15 +40,14 @@ codex:
 agents:
   builder:
     mode: builder
-    runtime: codex
-    tier: medium
-    mcp:
-      - linear-read
+    runtime: claude_code
+    tier: sonnet
+    mcp: []
   reviewers:
     - mode: reviewer
       runtime: claude_code
       persona: reviewer.md
-      tier: sonnet
+      tier: opus
       mcp: []
 ---
 
