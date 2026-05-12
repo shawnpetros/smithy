@@ -19,7 +19,7 @@ defmodule Smithy.Config do
   and the `[[repos]]` array.
   """
 
-  @default_path "~/.smithy/config.toml"
+  @default_path ".smithy/config.toml"
   @default_runtime "codex"
   @default_workflow "WORKFLOW.md"
   @default_symphony_binary "/usr/local/bin/symphony"
@@ -46,7 +46,7 @@ defmodule Smithy.Config do
     # up at runtime; Path.expand("~/...") consults a snapshot the BEAM captured
     # at startup and ignores later System.put_env calls.
     home = System.get_env("HOME") || System.user_home!() || "/"
-    Path.join(home, ".smithy/config.toml")
+    Path.join(home, @default_path)
   end
 
   @spec defaults() :: t()
@@ -127,20 +127,23 @@ defmodule Smithy.Config do
   """
   @spec render(t()) :: String.t()
   def render(config) do
-    top_lines =
+    {extra_lines, extra_blocks} = extras_sections(Map.get(config, :extras, %{}))
+
+    top_section =
       [
         kv("default_runtime", config.default_runtime),
         kv("default_workflow", config.default_workflow),
         kv("symphony_binary", config.symphony_binary)
       ]
       |> maybe_append_acknowledgement(config)
-      |> Kernel.++(extras_lines(Map.get(config, :extras, %{})))
+      |> Kernel.++(extra_lines)
+      |> Enum.join("\n")
 
     repo_blocks =
-      config.repos
-      |> Enum.map(&render_repo/1)
+      "repos"
+      |> render_array_of_tables(config.repos)
 
-    [Enum.join(top_lines, "\n"), Enum.join(repo_blocks, "\n")]
+    [top_section | extra_blocks ++ repo_blocks]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
     |> Kernel.<>("\n")
@@ -170,7 +173,8 @@ defmodule Smithy.Config do
     }
   end
 
-  defp maybe_append_acknowledgement(lines, %{acknowledged_at: at}) when is_binary(at) and at != "" do
+  defp maybe_append_acknowledgement(lines, %{acknowledged_at: at})
+       when is_binary(at) and at != "" do
     lines ++ [kv("acknowledged_at", at)]
   end
 
@@ -185,44 +189,88 @@ defmodule Smithy.Config do
     }
   end
 
-  defp render_repo(repo) do
-    """
-    [[repos]]
-    slug = "#{repo.slug}"
-    path = "#{repo.path}"
-    workflow = "#{repo.workflow}"
-    port = #{repo.port}
-    """
-    |> String.trim_trailing()
-  end
+  defp kv(key, value), do: "#{render_key_segment(key)} = #{render_value!(value)}"
 
-  defp kv(key, value) when is_binary(value), do: ~s(#{key} = "#{value}")
-  defp kv(key, value) when is_integer(value), do: "#{key} = #{value}"
-  defp kv(key, value) when is_boolean(value), do: "#{key} = #{value}"
+  defp extras_sections(map) when map_size(map) == 0, do: {[], []}
 
-  defp extras_lines(map) when map_size(map) == 0, do: []
+  defp extras_sections(map), do: render_entries(map, [])
 
-  defp extras_lines(map) do
+  defp render_entries(map, path) do
     map
-    |> Enum.sort()
-    |> Enum.map(fn {k, v} -> render_extra(k, v) end)
-    |> Enum.reject(&is_nil/1)
+    |> Enum.sort_by(fn {k, _v} -> to_string(k) end)
+    |> Enum.reduce({[], []}, fn {k, v}, {lines, blocks} ->
+      key = to_string(k)
+
+      cond do
+        scalar_or_scalar_array?(v) ->
+          {lines ++ [kv(key, v)], blocks}
+
+        is_map(v) ->
+          {lines, blocks ++ render_table(path ++ [key], v)}
+
+        array_of_tables?(v) ->
+          {lines, blocks ++ render_array_of_tables(path ++ [key], v)}
+
+        true ->
+          raise ArgumentError,
+                "unsupported TOML value at #{render_path(path ++ [key])}: #{inspect(v)}"
+      end
+    end)
   end
 
-  defp render_extra(k, v) when is_binary(v), do: kv(k, v)
-  defp render_extra(k, v) when is_integer(v), do: kv(k, v)
-  defp render_extra(k, v) when is_boolean(v), do: kv(k, v)
+  defp render_table(path, map) do
+    {lines, blocks} = render_entries(map, path)
+    [Enum.join(["[#{render_path(path)}]" | lines], "\n") | blocks]
+  end
 
-  defp render_extra(k, v) when is_list(v) do
-    if Enum.all?(v, &is_binary/1) do
-      "#{k} = [#{Enum.map_join(v, ", ", &~s("#{&1}"))}]"
+  defp render_array_of_tables(path, rows) do
+    rows
+    |> Enum.flat_map(fn row ->
+      {lines, blocks} = render_entries(row, List.wrap(path))
+      [Enum.join(["[[#{render_path(path)}]]" | lines], "\n") | blocks]
+    end)
+  end
+
+  defp scalar_or_scalar_array?(value), do: scalar?(value) or scalar_array?(value)
+
+  defp scalar?(value) when is_binary(value), do: true
+  defp scalar?(value) when is_integer(value), do: true
+  defp scalar?(value) when is_float(value), do: true
+  defp scalar?(value) when is_boolean(value), do: true
+  defp scalar?(_value), do: false
+
+  defp scalar_array?(value) when is_list(value), do: Enum.all?(value, &scalar?/1)
+  defp scalar_array?(_value), do: false
+
+  defp array_of_tables?([first | _] = value), do: is_map(first) and Enum.all?(value, &is_map/1)
+  defp array_of_tables?(_value), do: false
+
+  defp render_value!(value) when is_binary(value), do: Jason.encode!(value)
+  defp render_value!(value) when is_integer(value), do: Integer.to_string(value)
+  defp render_value!(value) when is_float(value), do: Float.to_string(value)
+  defp render_value!(value) when is_boolean(value), do: to_string(value)
+
+  defp render_value!(value) when is_list(value) do
+    if scalar_array?(value) do
+      "[" <> Enum.map_join(value, ", ", &render_value!/1) <> "]"
     else
-      # Skip arrays we can't trivially round-trip; better to drop than corrupt.
-      nil
+      raise ArgumentError, "unsupported TOML array value: #{inspect(value)}"
     end
   end
 
-  defp render_extra(_k, _v), do: nil
+  defp render_value!(value), do: raise(ArgumentError, "unsupported TOML value: #{inspect(value)}")
+
+  defp render_path(path), do: path |> List.wrap() |> Enum.map_join(".", &render_key_segment/1)
+
+  defp render_key_segment(key) do
+    key = to_string(key)
+
+    if String.match?(key, ~r/^[A-Za-z0-9_-]+$/) do
+      key
+    else
+      Jason.encode!(key)
+    end
+  end
 
   defp resolve_path(nil), do: default_path()
   defp resolve_path(path), do: Path.expand(path)
