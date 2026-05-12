@@ -32,12 +32,19 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.Argv do
   @typedoc """
   Options for `build/2`:
 
-    * `:tier` (default `:sonnet`) — model tier
-    * `:disallowed_tools` (default Linear write set) — list of MCP tool ids to deny
-    * `:session_id` (optional) — resume an existing Claude Code session
-    * `:max_budget_usd` (optional) — pass `--max-budget-usd N` for hard cost cap
-    * `:append_system_prompt` (optional) — string for `--append-system-prompt`
-    * `:add_dirs` (optional) — list of extra dirs for `--add-dir`
+    * `:tier` (default `:sonnet`) - model tier
+    * `:disallowed_tools` (default Linear write set) - list of MCP tool ids to deny
+    * `:session_id` (optional) - resume an existing Claude Code session
+    * `:max_budget_usd` (optional) - pass `--max-budget-usd N` for hard cost cap
+    * `:append_system_prompt` (optional) - string for `--append-system-prompt`
+    * `:add_dirs` (optional) - list of extra dirs for `--add-dir`
+    * `:mcp_config` (optional) - path to a generated mcp config JSON file. When
+      set, the builder emits `--mcp-config <path>`. Symphony's MCP bundle module
+      writes this file before spawn.
+    * `:strict_mcp_config` (default false) - when true, emits `--strict-mcp-config`
+      so user-scope MCP servers don't leak in. Only meaningful in conjunction
+      with `:mcp_config`. Defaults to false to preserve backward compatibility
+      with callers that don't yet generate a bundle JSON.
   """
   @type opts :: [
           tier: tier(),
@@ -45,7 +52,9 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.Argv do
           session_id: String.t() | nil,
           max_budget_usd: number() | nil,
           append_system_prompt: String.t() | nil,
-          add_dirs: [Path.t()]
+          add_dirs: [Path.t()],
+          mcp_config: Path.t() | nil,
+          strict_mcp_config: boolean()
         ]
 
   @default_disallowed_tools [
@@ -78,6 +87,8 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.Argv do
     max_budget = Keyword.get(opts, :max_budget_usd)
     append_sp = Keyword.get(opts, :append_system_prompt)
     add_dirs = Keyword.get(opts, :add_dirs, [])
+    mcp_config = Keyword.get(opts, :mcp_config)
+    strict_mcp = Keyword.get(opts, :strict_mcp_config, false)
 
     base = [
       "-p",
@@ -98,6 +109,7 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.Argv do
     |> maybe_append(max_budget, fn n -> ["--max-budget-usd", to_string(n)] end)
     |> maybe_append(append_sp, fn sp -> ["--append-system-prompt", sp] end)
     |> append_add_dirs(add_dirs)
+    |> append_mcp_config(mcp_config, strict_mcp)
   end
 
   @doc "Canonical `claude-*` model id per tier."
@@ -119,5 +131,17 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.Argv do
 
   defp append_add_dirs(args, dirs) when is_list(dirs) do
     args ++ ["--add-dir"] ++ dirs
+  end
+
+  # No MCP config path: ignore strict flag too. `--strict-mcp-config` only makes
+  # sense when paired with a generated bundle file, otherwise claude rejects it.
+  defp append_mcp_config(args, nil, _strict), do: args
+
+  defp append_mcp_config(args, path, true) when is_binary(path) do
+    args ++ ["--strict-mcp-config", "--mcp-config", path]
+  end
+
+  defp append_mcp_config(args, path, _strict) when is_binary(path) do
+    args ++ ["--mcp-config", path]
   end
 end

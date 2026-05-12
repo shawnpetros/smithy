@@ -129,6 +129,41 @@ defmodule SymphonyElixir.Runtime.ClaudeCode.ArgvTest do
     end
   end
 
+  describe "build/2 mcp config" do
+    test "does not include --mcp-config by default" do
+      args = Argv.build("/usr/local/bin/claude")
+      refute "--mcp-config" in args
+      refute "--strict-mcp-config" in args
+    end
+
+    test "appends --mcp-config when path provided" do
+      args =
+        Argv.build("/usr/local/bin/claude",
+          mcp_config: "/tmp/bundle.json"
+        )
+
+      assert flag_value(args, "--mcp-config") == "/tmp/bundle.json"
+      refute "--strict-mcp-config" in args
+    end
+
+    test "appends --strict-mcp-config and --mcp-config when strict and path provided" do
+      args =
+        Argv.build("/usr/local/bin/claude",
+          mcp_config: "/tmp/bundle.json",
+          strict_mcp_config: true
+        )
+
+      assert "--strict-mcp-config" in args
+      assert flag_value(args, "--mcp-config") == "/tmp/bundle.json"
+    end
+
+    test "ignores strict_mcp_config when no path is provided" do
+      args = Argv.build("/usr/local/bin/claude", strict_mcp_config: true)
+      refute "--strict-mcp-config" in args
+      refute "--mcp-config" in args
+    end
+  end
+
   describe "build/2 system prompt and add-dirs" do
     test "appends --append-system-prompt when set" do
       args =
