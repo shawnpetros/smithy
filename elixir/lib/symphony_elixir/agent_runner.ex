@@ -31,6 +31,19 @@ defmodule SymphonyElixir.AgentRunner do
 
   @run_id_pdict_key :smithy_run_id
   @telemetry_mod_pdict_key :smithy_telemetry_mod
+  # PER-157: process-dict accumulator for per-turn token usage + cost. Reset
+  # at the start of each turn iteration; read at :turn_end emit time. The
+  # on_message callback wrapper captures usage from claude/codex events
+  # directly into this key, in the same process that does the emit.
+  @turn_usage_pdict_key :smithy_turn_usage
+
+  @empty_turn_usage %{
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    cost_usd: 0.0
+  }
 
   @spec run(map(), pid() | nil, keyword()) :: :ok | no_return()
   def run(issue, codex_update_recipient \\ nil, opts \\ []) do
@@ -399,8 +412,42 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp codex_message_handler(recipient, issue) do
     fn message ->
+      capture_turn_usage(message)
       send_codex_update(recipient, issue, message)
     end
+  end
+
+  # PER-157: harvest token usage + cost from runtime events into the process
+  # dict so the next :turn_end emit can include them. Called on every event
+  # from claude/codex AppServer via the wrapped on_message callback. Same
+  # process runs the emit, so process dict is the right scope.
+  defp capture_turn_usage({:assistant_message, %{usage: usage}}) when is_map(usage) do
+    current = Process.get(@turn_usage_pdict_key, @empty_turn_usage)
+
+    Process.put(@turn_usage_pdict_key, %{
+      input_tokens: current.input_tokens + Map.get(usage, "input_tokens", 0),
+      output_tokens: current.output_tokens + Map.get(usage, "output_tokens", 0),
+      cache_read_tokens:
+        current.cache_read_tokens + Map.get(usage, "cache_read_input_tokens", 0),
+      cache_creation_tokens:
+        current.cache_creation_tokens + Map.get(usage, "cache_creation_input_tokens", 0),
+      cost_usd: current.cost_usd
+    })
+  end
+
+  defp capture_turn_usage({:result, %{total_cost_usd: cost}}) when is_number(cost) do
+    current = Process.get(@turn_usage_pdict_key, @empty_turn_usage)
+    Process.put(@turn_usage_pdict_key, %{current | cost_usd: current.cost_usd + cost})
+  end
+
+  defp capture_turn_usage(_event), do: :ok
+
+  defp reset_turn_usage do
+    Process.put(@turn_usage_pdict_key, @empty_turn_usage)
+  end
+
+  defp read_turn_usage do
+    Process.get(@turn_usage_pdict_key, @empty_turn_usage)
   end
 
   defp send_codex_update(recipient, %Issue{id: issue_id}, message)
@@ -569,18 +616,26 @@ defmodule SymphonyElixir.AgentRunner do
       run_id: run_id
     )
 
+    reset_turn_usage()
     turn_started_at = System.monotonic_time(:millisecond)
     turn_result = ClaudeAppServer.run_turn(session, prompt, issue, on_message: codex_message_handler(recipient, issue))
     duration_ms = System.monotonic_time(:millisecond) - turn_started_at
 
     case turn_result do
       {:ok, summary} ->
+        usage = read_turn_usage()
+
         safe_emit_pdict(:turn_end,
           ticket: issue.identifier,
           mode: :builder,
           runtime: :claude_code,
           turn_number: turn_number,
           duration_ms: duration_ms,
+          input_tokens: usage.input_tokens,
+          output_tokens: usage.output_tokens,
+          cache_read_tokens: usage.cache_read_tokens,
+          cache_creation_tokens: usage.cache_creation_tokens,
+          cost_usd: usage.cost_usd,
           outcome: :success,
           run_id: run_id
         )
