@@ -1,7 +1,9 @@
 ---
 tracker:
   kind: linear
-  project_slug: "symphony-0c79b11b75ea"
+  project_slug: "smithy-engineering-b3a1a7605988"
+  labels:
+    - agent-ready
   active_states:
     - Todo
     - In Progress
@@ -15,12 +17,12 @@ tracker:
     - Duplicate
     - Done
 polling:
-  interval_ms: 5000
+  interval_ms: 30000
 workspace:
-  root: ~/code/symphony-workspaces
+  root: ~/.smithy/workspaces/smithy
 hooks:
   after_create: |
-    git clone --depth 1 https://github.com/openai/symphony .
+    git clone --depth 1 git@github.com:shawnpetros/smithy.git .
     if command -v mise >/dev/null 2>&1; then
       cd elixir && mise trust && mise exec -- mix deps.get
     fi
