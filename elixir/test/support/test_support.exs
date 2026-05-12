@@ -28,7 +28,8 @@ defmodule SymphonyElixir.TestSupport do
           write_workflow_with_alerts!: 0,
           write_workflow_with_alerts!: 1,
           restore_env: 2,
-          stop_default_http_server: 0
+          stop_default_http_server: 0,
+          stop_default_orchestrator: 0
         ]
 
       setup do
@@ -44,6 +45,7 @@ defmodule SymphonyElixir.TestSupport do
         Workflow.set_workflow_file_path(workflow_file)
         if Process.whereis(SymphonyElixir.WorkflowStore), do: SymphonyElixir.WorkflowStore.force_reload()
         stop_default_http_server()
+        stop_default_orchestrator()
 
         on_exit(fn ->
           Application.delete_env(:symphony_elixir, :workflow_file_path)
@@ -89,6 +91,25 @@ defmodule SymphonyElixir.TestSupport do
          end) do
       {SymphonyElixir.HttpServer, pid, _type, _modules} when is_pid(pid) ->
         :ok = Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.HttpServer)
+
+        if Process.alive?(pid) do
+          Process.exit(pid, :normal)
+        end
+
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
+
+  def stop_default_orchestrator do
+    case Enum.find(Supervisor.which_children(SymphonyElixir.Supervisor), fn
+           {SymphonyElixir.Orchestrator, _pid, _type, _modules} -> true
+           _child -> false
+         end) do
+      {SymphonyElixir.Orchestrator, pid, _type, _modules} when is_pid(pid) ->
+        :ok = Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.Orchestrator)
 
         if Process.alive?(pid) do
           Process.exit(pid, :normal)

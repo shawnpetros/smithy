@@ -176,8 +176,12 @@ defmodule SymphonyElixir.TelemetryTest do
 
   defp wait_until_gone(pid, attempts \\ 50) do
     cond do
-      not Process.alive?(pid) -> :ok
-      attempts <= 0 -> :ok
+      not Process.alive?(pid) ->
+        :ok
+
+      attempts <= 0 ->
+        :ok
+
       true ->
         Process.sleep(10)
         wait_until_gone(pid, attempts - 1)

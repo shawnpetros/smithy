@@ -75,8 +75,7 @@ defmodule SymphonyElixir.WorkpadTest do
 
             %{
               state
-              | comments_by_issue:
-                  Map.put(state.comments_by_issue, to_string(issue_id), existing ++ [new_comment])
+              | comments_by_issue: Map.put(state.comments_by_issue, to_string(issue_id), existing ++ [new_comment])
             }
           end)
 
@@ -97,20 +96,7 @@ defmodule SymphonyElixir.WorkpadTest do
       case Agent.get(pid, fn state -> Map.get(state, :update_response) end) do
         nil ->
           Agent.update(pid, fn state ->
-            updated =
-              state.comments_by_issue
-              |> Enum.map(fn {issue_id, comments} ->
-                new_comments =
-                  Enum.map(comments, fn
-                    %{id: ^comment_id} = c -> %{c | body: body}
-                    other -> other
-                  end)
-
-                {issue_id, new_comments}
-              end)
-              |> Map.new()
-
-            %{state | comments_by_issue: updated}
+            %{state | comments_by_issue: update_stored_comment(state.comments_by_issue, comment_id, body)}
           end)
 
           {:ok, comment_id}
@@ -133,6 +119,15 @@ defmodule SymphonyElixir.WorkpadTest do
         pid -> pid
       end
     end
+
+    defp update_stored_comment(comments_by_issue, comment_id, body) do
+      Map.new(comments_by_issue, fn {issue_id, comments} ->
+        {issue_id, Enum.map(comments, &update_comment_body(&1, comment_id, body))}
+      end)
+    end
+
+    defp update_comment_body(%{id: comment_id} = comment, comment_id, body), do: %{comment | body: body}
+    defp update_comment_body(comment, _comment_id, _body), do: comment
   end
 
   setup do

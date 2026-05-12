@@ -108,8 +108,7 @@ defmodule SymphonyElixir.Personas.Persona do
             collect_frontmatter(tail, [])
 
           other ->
-            {:error,
-             "expected `---` at start of persona frontmatter, got `#{other}`"}
+            {:error, "expected `---` at start of persona frontmatter, got `#{other}`"}
         end
     end
   end

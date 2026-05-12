@@ -22,11 +22,11 @@ defmodule SymphonyElixir.Telemetry.Store do
   def write(%Event{} = event, opts \\ []) do
     path = file_path_for(event, opts)
     dir = Path.dirname(path)
+    line = Event.to_jsonl_line(event)
 
-    with :ok <- File.mkdir_p(dir),
-         line <- Event.to_jsonl_line(event),
-         :ok <- File.write(path, [line, "\n"], [:append]) do
-      :ok
+    case File.mkdir_p(dir) do
+      :ok -> File.write(path, [line, "\n"], [:append])
+      {:error, _reason} = error -> error
     end
   end
 

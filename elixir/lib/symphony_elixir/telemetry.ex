@@ -52,9 +52,7 @@ defmodule SymphonyElixir.Telemetry do
 
     case Process.whereis(__MODULE__) do
       nil ->
-        Logger.warning(
-          "Telemetry GenServer not running; dropping event #{inspect(kind)} ticket=#{inspect(event.ticket)}"
-        )
+        Logger.warning("Telemetry GenServer not running; dropping event #{inspect(kind)} ticket=#{inspect(event.ticket)}")
 
         :ok
 
@@ -136,9 +134,7 @@ defmodule SymphonyElixir.Telemetry do
           %{state | written: state.written + 1}
 
         {:error, reason} ->
-          Logger.error(
-            "Telemetry write failed event=#{inspect(event.event)} reason=#{inspect(reason)}"
-          )
+          Logger.error("Telemetry write failed event=#{inspect(event.event)} reason=#{inspect(reason)}")
 
           %{state | dropped: state.dropped + 1}
       end
