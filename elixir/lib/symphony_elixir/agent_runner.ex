@@ -14,6 +14,12 @@ defmodule SymphonyElixir.AgentRunner do
       Linear state (PROCEED -> `In Progress`, FLAG -> `Backlog` with
       `needs-spec` + `-agent-ready`, BLOCKED -> stays in `Todo` with
       `harness-blocked`).
+
+  State transition writes are best-effort inside this short-lived runner:
+  `Tracker.update_issue_state/2` errors are logged but not retried here. Linear
+  remains the source of truth, and the next orchestrator poll/reconcile decides
+  whether the unchanged ticket state should be dispatched again or surfaced for
+  operator recovery.
   """
 
   require Logger

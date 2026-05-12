@@ -319,8 +319,9 @@ defmodule SymphonyElixir.Config.Schema do
     @moduledoc """
     Three-axis agent dispatch configuration.
 
-    `builder` is the canonical builder slot (always present, defaulted to
-    vanilla Symphony behavior when the workflow omits the block).
+    `builder` is the canonical builder slot (defaulted to vanilla Symphony
+    behavior when the workflow omits the block, but allowed to be explicitly
+    `null` so dispatch can fail loudly for no-builder configurations).
     `reviewers` is a list for forward-compatible panel review; v1 honors only
     the first element. `triager` is optional and gates `In Progress`.
     """
@@ -363,14 +364,16 @@ defmodule SymphonyElixir.Config.Schema do
 
   @spec parse(map()) :: {:ok, %__MODULE__{}} | {:error, {:invalid_workflow_config, String.t()}}
   def parse(config) when is_map(config) do
-    config
-    |> normalize_keys()
+    normalized_config = normalize_keys(config)
+    explicit_nil_builder? = explicit_nil_builder?(normalized_config)
+
+    normalized_config
     |> drop_nil_values()
     |> changeset()
     |> apply_action(:validate)
     |> case do
       {:ok, settings} ->
-        {:ok, finalize_settings(settings)}
+        {:ok, finalize_settings(settings, explicit_nil_builder?)}
 
       {:error, changeset} ->
         {:error, {:invalid_workflow_config, format_errors(changeset)}}
@@ -455,7 +458,7 @@ defmodule SymphonyElixir.Config.Schema do
     |> cast_embed(:alerts, with: &Alerts.changeset/2)
   end
 
-  defp finalize_settings(settings) do
+  defp finalize_settings(settings, explicit_nil_builder?) do
     tracker = %{
       settings.tracker
       | api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env("LINEAR_API_KEY")),
@@ -473,17 +476,26 @@ defmodule SymphonyElixir.Config.Schema do
         turn_sandbox_policy: normalize_optional_map(settings.codex.turn_sandbox_policy)
     }
 
-    agents = finalize_agents(settings.agents)
+    agents = finalize_agents(settings.agents, explicit_nil_builder?)
 
     %{settings | tracker: tracker, workspace: workspace, codex: codex, agents: agents}
   end
 
-  defp finalize_agents(%Agents{} = agents) do
+  defp finalize_agents(%Agents{} = agents, true), do: %{agents | builder: nil}
+
+  defp finalize_agents(%Agents{} = agents, false) do
     builder = agents.builder || default_builder()
     %{agents | builder: builder}
   end
 
-  defp finalize_agents(nil), do: %Agents{builder: default_builder(), reviewers: [], triager: nil}
+  defp finalize_agents(nil, _explicit_nil_builder?),
+    do: %Agents{builder: default_builder(), reviewers: [], triager: nil}
+
+  defp explicit_nil_builder?(%{"agents" => %{} = agents}) do
+    Map.has_key?(agents, "builder") and is_nil(Map.get(agents, "builder"))
+  end
+
+  defp explicit_nil_builder?(_config), do: false
 
   defp default_builder do
     %AgentConfig{

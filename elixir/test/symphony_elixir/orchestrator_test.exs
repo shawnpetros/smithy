@@ -4,7 +4,7 @@ defmodule SymphonyElixir.OrchestratorTest do
   alias SymphonyElixir.Config.Schema.AgentConfig
 
   describe "select_agent_config_for_issue/1 (sub-pass B)" do
-    test "returns :builder for any active issue when no reviewer/triager is configured" do
+    test "agents block absent entirely yields vanilla Codex builder defaults" do
       issue = %Issue{
         id: "issue-select-builder",
         identifier: "MT-SELECT-1",
@@ -20,6 +20,17 @@ defmodule SymphonyElixir.OrchestratorTest do
 
       assert agent_config.mode == :builder
       assert agent_config.runtime == :codex
+    end
+
+    test "normalizes Todo state name casing and surrounding spaces before selecting triager" do
+      write_workflow_with_agents!(triager: triager_yaml())
+
+      for state <- ["todo", "Todo", " Todo "] do
+        issue = issue_for_select("issue-select-tri-#{state}", "MT-SELECT-TRI-NORM", state)
+
+        assert {:triager, %AgentConfig{mode: :triager}} =
+                 Orchestrator.select_agent_config_for_issue_for_test(issue)
+      end
     end
 
     test "returns :reviewer for Adversarial Review when reviewers list is non-empty" do
@@ -39,7 +50,9 @@ defmodule SymphonyElixir.OrchestratorTest do
                Orchestrator.select_agent_config_for_issue_for_test(issue)
     end
 
-    test "returns :builder for Adversarial Review when reviewers list is empty" do
+    test "returns :builder for Adversarial Review when agents.reviewers is an explicit empty list" do
+      write_workflow_with_agents!(reviewers: [])
+
       issue = %Issue{
         id: "issue-select-rev-empty",
         identifier: "MT-SELECT-REV-EMPTY",
@@ -51,6 +64,21 @@ defmodule SymphonyElixir.OrchestratorTest do
       }
 
       assert {:builder, %AgentConfig{mode: :builder}} =
+               Orchestrator.select_agent_config_for_issue_for_test(issue)
+    end
+
+    test "returns the first reviewer when multiple reviewers are configured" do
+      write_workflow_with_agents!(
+        reviewers: [
+          reviewer_yaml("reviewer.md", "claude_code"),
+          reviewer_yaml("architect-reviewer.md", "codex")
+        ]
+      )
+
+      issue =
+        issue_for_select("issue-select-rev-panel", "MT-SELECT-REV-PANEL", "Adversarial Review")
+
+      assert {:reviewer, %AgentConfig{mode: :reviewer, persona: "reviewer.md"}} =
                Orchestrator.select_agent_config_for_issue_for_test(issue)
     end
 
@@ -86,6 +114,17 @@ defmodule SymphonyElixir.OrchestratorTest do
                Orchestrator.select_agent_config_for_issue_for_test(issue)
     end
 
+    test "triager-only config triages Todo and fails loudly when In Progress needs a builder" do
+      write_workflow_with_agents!(builder: nil, triager: triager_yaml())
+
+      assert {:triager, %AgentConfig{mode: :triager}} =
+               Orchestrator.select_agent_config_for_issue_for_test(issue_for_select("issue-select-tri-only", "MT-SELECT-TRI-ONLY", "Todo"))
+
+      assert_raise ArgumentError, ~r/agents\.builder is required/, fn ->
+        Orchestrator.select_agent_config_for_issue_for_test(issue_for_select("issue-select-no-builder", "MT-SELECT-NO-BUILDER", "In Progress"))
+      end
+    end
+
     test "returns :builder for In Progress even with a triager configured" do
       # Triager only fires on Todo. Once the issue transitions, the builder
       # takes over.
@@ -106,11 +145,31 @@ defmodule SymphonyElixir.OrchestratorTest do
     end
   end
 
-  defp reviewer_yaml do
+  describe "revalidate_issue_for_dispatch/2" do
+    test "uses refreshed issue state when Adversarial Review becomes Rework before dispatch" do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_active_states: ["Todo", "In Progress", "Adversarial Review", "Rework"]
+      )
+
+      stale_issue =
+        issue_for_select("issue-revalidate-race", "MT-REVALIDATE-RACE", "Adversarial Review")
+
+      refreshed_issue = %{stale_issue | state: "Rework"}
+      fetcher = fn ["issue-revalidate-race"] -> {:ok, [refreshed_issue]} end
+
+      assert {:ok, ^refreshed_issue} =
+               Orchestrator.revalidate_issue_for_dispatch_for_test(stale_issue, fetcher)
+
+      assert {:builder, %AgentConfig{mode: :builder}} =
+               Orchestrator.select_agent_config_for_issue_for_test(refreshed_issue)
+    end
+  end
+
+  defp reviewer_yaml(persona \\ "reviewer.md", runtime \\ "claude_code") do
     """
         - mode: reviewer
-          runtime: claude_code
-          persona: reviewer.md
+          runtime: #{runtime}
+          persona: #{persona}
     """
   end
 
@@ -123,12 +182,13 @@ defmodule SymphonyElixir.OrchestratorTest do
   end
 
   defp write_workflow_with_agents!(opts) do
-    reviewers = Keyword.get(opts, :reviewers, [])
+    builder = Keyword.get(opts, :builder, :default)
+    reviewers = Keyword.get(opts, :reviewers, :omitted)
     triager = Keyword.get(opts, :triager)
 
     agents_block =
       ["agents:"]
-      |> append_builder_yaml()
+      |> append_builder_yaml(builder)
       |> append_reviewers_yaml(reviewers)
       |> append_triager_yaml(triager)
       |> Enum.join("\n")
@@ -147,7 +207,7 @@ defmodule SymphonyElixir.OrchestratorTest do
     :ok
   end
 
-  defp append_builder_yaml(lines) do
+  defp append_builder_yaml(lines, :default) do
     lines ++
       [
         "  builder:",
@@ -156,7 +216,11 @@ defmodule SymphonyElixir.OrchestratorTest do
       ]
   end
 
-  defp append_reviewers_yaml(lines, []), do: lines
+  defp append_builder_yaml(lines, nil), do: lines ++ ["  builder: null"]
+  defp append_builder_yaml(lines, :omitted), do: lines
+
+  defp append_reviewers_yaml(lines, :omitted), do: lines
+  defp append_reviewers_yaml(lines, []), do: lines ++ ["  reviewers: []"]
 
   defp append_reviewers_yaml(lines, reviewers) when is_list(reviewers) do
     lines ++ ["  reviewers:" | Enum.map(reviewers, &String.trim_trailing/1)]
@@ -167,5 +231,17 @@ defmodule SymphonyElixir.OrchestratorTest do
   defp append_triager_yaml(lines, triager) when is_binary(triager) do
     lines ++
       ["  triager:" | String.split(String.trim_trailing(triager), "\n")]
+  end
+
+  defp issue_for_select(id, identifier, state) do
+    %Issue{
+      id: id,
+      identifier: identifier,
+      title: "Select #{identifier}",
+      description: "",
+      state: state,
+      url: "https://example.org/issues/#{identifier}",
+      labels: []
+    }
   end
 end

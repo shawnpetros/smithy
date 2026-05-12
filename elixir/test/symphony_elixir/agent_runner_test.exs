@@ -198,7 +198,7 @@ defmodule SymphonyElixir.AgentRunnerTest do
       assert content =~ "[blocker] Tests do not pass"
     end
 
-    test "BLOCKED outcome applies harness-blocked label and notes" do
+    test "BLOCKED outcome applies harness-blocked label and stays in Adversarial Review" do
       tracker_table = new_stub_table()
       workpad_table = new_stub_table()
 
@@ -218,7 +218,10 @@ defmodule SymphonyElixir.AgentRunnerTest do
                  workpad_mod: stub_workpad_mod(workpad_table)
                )
 
-      assert {:add_label, issue, "harness-blocked"} in read_stub_calls(tracker_table)
+      tracker_calls = read_stub_calls(tracker_table)
+
+      assert {:add_label, issue, "harness-blocked"} in tracker_calls
+      refute Enum.any?(tracker_calls, &match?({:update_issue_state, _, _}, &1))
 
       assert Enum.any?(read_stub_calls(workpad_table), fn
                {:append_section, "issue-rev-blocked", :notes, content, _} ->
@@ -255,6 +258,91 @@ defmodule SymphonyElixir.AgentRunnerTest do
       assert log =~ "Reviewer mode failed"
 
       assert {:add_label, issue, "harness-blocked"} in read_stub_calls(tracker_table)
+    end
+
+    test "raising reviewer_mod is not swallowed by telemetry safety" do
+      tracker_table = new_stub_table()
+      workpad_table = new_stub_table()
+      telemetry_table = new_stub_table()
+
+      issue =
+        review_issue("issue-rev-raise", "MT-REV-RAISE", state: "Adversarial Review", labels: [])
+
+      reviewer_stub = fn _issue, _workspace, _agent_config, _opts ->
+        raise "reviewer exploded"
+      end
+
+      log =
+        capture_log(fn ->
+          assert_raise RuntimeError, "reviewer exploded", fn ->
+            AgentRunner.run(issue, nil,
+              mode: :reviewer,
+              agent_config: reviewer_agent_config(),
+              reviewer_mod: stub_reviewer(reviewer_stub),
+              tracker_mod: stub_tracker_mod(tracker_table),
+              workpad_mod: stub_workpad_mod(workpad_table),
+              telemetry_mod: stub_telemetry_mod(telemetry_table)
+            )
+          end
+        end)
+
+      assert read_stub_calls(tracker_table) == []
+      assert read_stub_calls(workpad_table) == []
+      assert log =~ "Starting agent run"
+
+      assert Enum.any?(read_stub_calls(telemetry_table), fn
+               {:emit, :session_end, opts} ->
+                 opts[:outcome] == :error and opts[:error] == "reviewer exploded"
+
+               _ ->
+                 false
+             end)
+    end
+
+    test "state update error is logged once and not retried inside the runner" do
+      tracker_table = new_stub_table()
+      workpad_table = new_stub_table()
+      telemetry_table = new_stub_table()
+
+      issue =
+        review_issue("issue-rev-state-error", "MT-REV-STATE-ERR",
+          state: "Adversarial Review",
+          labels: []
+        )
+
+      review = %SymphonyElixir.Handoff.Review{
+        status: :pass,
+        findings: [],
+        notes: nil
+      }
+
+      reviewer_stub = fn _issue, _workspace, _agent_config, _opts ->
+        {:ok, {:pass, review}}
+      end
+
+      log =
+        capture_log(fn ->
+          assert :ok =
+                   AgentRunner.run(issue, nil,
+                     mode: :reviewer,
+                     agent_config: reviewer_agent_config(),
+                     reviewer_mod: stub_reviewer(reviewer_stub),
+                     tracker_mod:
+                       stub_tracker_mod(tracker_table,
+                         update_issue_state: {:error, :state_not_found}
+                       ),
+                     workpad_mod: stub_workpad_mod(workpad_table),
+                     telemetry_mod: stub_telemetry_mod(telemetry_table)
+                   )
+        end)
+
+      assert read_stub_calls(tracker_table) == [
+               {:update_issue_state, "issue-rev-state-error", "Human Review"}
+             ]
+
+      refute Enum.any?(read_stub_calls(telemetry_table), &match?({:emit, :state_transition, _}, &1))
+      assert log =~ "State transition to Human Review failed"
+      assert log =~ ":state_not_found"
     end
   end
 
@@ -460,7 +548,7 @@ defmodule SymphonyElixir.AgentRunnerTest do
       assert content =~ "Spec missing the target module."
     end
 
-    test "BLOCKED outcome applies harness-blocked label and notes" do
+    test "BLOCKED outcome applies harness-blocked label and stays in Todo" do
       tracker_table = new_stub_table()
       workpad_table = new_stub_table()
 
@@ -479,7 +567,10 @@ defmodule SymphonyElixir.AgentRunnerTest do
                  workpad_mod: stub_workpad_mod(workpad_table)
                )
 
-      assert {:add_label, issue, "harness-blocked"} in read_stub_calls(tracker_table)
+      tracker_calls = read_stub_calls(tracker_table)
+
+      assert {:add_label, issue, "harness-blocked"} in tracker_calls
+      refute Enum.any?(tracker_calls, &match?({:update_issue_state, _, _}, &1))
 
       assert Enum.any?(read_stub_calls(workpad_table), fn
                {:append_section, "issue-tri-blocked", :notes, content, _} ->
@@ -488,6 +579,55 @@ defmodule SymphonyElixir.AgentRunnerTest do
                _ ->
                  false
              end)
+    end
+
+    test "network failure during state transition leaves Linear as recovery source" do
+      tracker_table = new_stub_table()
+      workpad_table = new_stub_table()
+      telemetry_table = new_stub_table()
+
+      issue = review_issue("issue-tri-network", "MT-TRI-NET", state: "Todo", labels: [])
+
+      triage = %SymphonyElixir.Handoff.Triage{
+        decision: :proceed,
+        reasons: ["Spec is clear"],
+        gap_comment: nil
+      }
+
+      triager_stub = fn _issue, _workspace, _agent_config, _opts ->
+        {:ok, {:proceed, triage}}
+      end
+
+      log =
+        capture_log(fn ->
+          assert :ok =
+                   AgentRunner.run(issue, nil,
+                     mode: :triager,
+                     agent_config: triager_agent_config(),
+                     triager_mod: stub_triager(triager_stub),
+                     tracker_mod:
+                       stub_tracker_mod(tracker_table,
+                         update_issue_state: {:error, :econnrefused}
+                       ),
+                     workpad_mod: stub_workpad_mod(workpad_table),
+                     telemetry_mod: stub_telemetry_mod(telemetry_table)
+                   )
+        end)
+
+      assert read_stub_calls(tracker_table) == [
+               {:update_issue_state, "issue-tri-network", "In Progress"}
+             ]
+
+      assert read_stub_calls(workpad_table) == []
+      refute Enum.any?(read_stub_calls(telemetry_table), &match?({:emit, :state_transition, _}, &1))
+
+      assert Enum.any?(read_stub_calls(telemetry_table), fn
+               {:emit, :session_end, opts} -> opts[:outcome] == :success
+               _ -> false
+             end)
+
+      assert log =~ "State transition to In Progress failed"
+      assert log =~ ":econnrefused"
     end
   end
 
@@ -619,8 +759,9 @@ defmodule SymphonyElixir.AgentRunnerTest do
     SymphonyElixir.AgentRunnerTest.TriagerStub
   end
 
-  defp stub_tracker_mod(table) do
+  defp stub_tracker_mod(table, failures \\ []) do
     :persistent_term.put({__MODULE__, :tracker_table, self()}, table)
+    :persistent_term.put({__MODULE__, :tracker_failures, self()}, failures)
     SymphonyElixir.AgentRunnerTest.TrackerStub
   end
 
@@ -661,21 +802,28 @@ defmodule SymphonyElixir.AgentRunnerTest do
       table = :persistent_term.get({SymphonyElixir.AgentRunnerTest, :tracker_table, self()})
       seq = :ets.update_counter(table, :__seq__, {2, 1}, {:__seq__, 0})
       :ets.insert(table, {seq, {:update_issue_state, issue_id, state_name}})
-      :ok
+      tracker_result(:update_issue_state)
     end
 
     def add_label(issue, label_name) do
       table = :persistent_term.get({SymphonyElixir.AgentRunnerTest, :tracker_table, self()})
       seq = :ets.update_counter(table, :__seq__, {2, 1}, {:__seq__, 0})
       :ets.insert(table, {seq, {:add_label, issue, label_name}})
-      :ok
+      tracker_result(:add_label)
     end
 
     def remove_label(issue, label_name) do
       table = :persistent_term.get({SymphonyElixir.AgentRunnerTest, :tracker_table, self()})
       seq = :ets.update_counter(table, :__seq__, {2, 1}, {:__seq__, 0})
       :ets.insert(table, {seq, {:remove_label, issue, label_name}})
-      :ok
+      tracker_result(:remove_label)
+    end
+
+    defp tracker_result(kind) do
+      failures =
+        :persistent_term.get({SymphonyElixir.AgentRunnerTest, :tracker_failures, self()}, [])
+
+      Keyword.get(failures, kind, :ok)
     end
   end
 
