@@ -109,6 +109,10 @@ ln -sf "$PWD/elixir/bin/symphony" ~/.local/bin/symphony
 
 After `add-repo`, a launchd plist lands at `~/Library/LaunchAgents/com.shawnpetros.smithy.<slug>.plist`. `daemon start` loads it; `daemon stop` unloads it. On restart after a self-update, launchd respawns automatically.
 
+## Merge-to-running pipeline
+
+Every push to `main` triggers `.github/workflows/ci.yml`, which runs format and test jobs for both `elixir/` and `wrapper/`, then builds both escripts and uploads them as workflow artifacts (fetchable with `gh run download`). That covers the CI half. The deploy half runs locally: `scripts/com.shawnpetros.smithy.deploy.plist` is a launchd agent that watches `.git/refs/heads/main` and fires `scripts/deploy.sh` whenever that ref changes (i.e., after any `git pull` or merge). The deploy script rebuilds both escripts via `mise exec` and bounces the running daemon with `launchctl kickstart -k`. To install the watcher, copy the plist to `~/Library/LaunchAgents/` and run `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.shawnpetros.smithy.deploy.plist`. For one-off manual deploys when the watcher is off, `make deploy` runs the same script.
+
 The first time you `daemon start`, if `~/.smithy/config.toml` has no `acknowledged_at`, the daemon prompts for acknowledgement before doing anything. Running `smithy acknowledge` ahead of time skips that prompt.
 
 ## WORKFLOW.md

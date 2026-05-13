@@ -91,6 +91,7 @@ defmodule Smithy.RepoRegistry do
   @spec next_port([Config.repo()]) :: pos_integer()
   def next_port(repos) do
     used = repos |> Enum.map(& &1.port) |> MapSet.new()
+
     Stream.iterate(@first_port, &(&1 + 1))
     |> Enum.find(&(!MapSet.member?(used, &1)))
   end

@@ -189,6 +189,7 @@ defmodule SymphonyElixir.Alerts do
 
   defp handle_retry_alert(state, issue_id, identifier, attempt, error) do
     settings = alerts_settings()
+
     if settings.enabled and attempt >= settings.max_retry_attempts do
       label = if is_binary(identifier), do: identifier, else: issue_id
       error_str = if is_binary(error), do: ", last: #{error}", else: ""

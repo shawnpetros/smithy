@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Post-merge auto-deploy watcher for Smithy.
+
+  This launchd agent watches the local smithy repo's main branch ref and
+  rebuilds both escripts + bounces the daemon automatically after every
+  git pull / merge to main.
+
+  Install:
+    1. Edit REPO_ROOT below to match your smithy clone path.
+    2. Copy to ~/Library/LaunchAgents/:
+         cp scripts/com.shawnpetros.smithy.deploy.plist \
+            ~/Library/LaunchAgents/
+    3. Load it (once; survives reboots automatically):
+         launchctl bootstrap gui/$UID \
+           ~/Library/LaunchAgents/com.shawnpetros.smithy.deploy.plist
+    4. To unload:
+         launchctl bootout gui/$UID \
+           ~/Library/LaunchAgents/com.shawnpetros.smithy.deploy.plist
+
+  The watcher fires scripts/deploy.sh whenever .git/refs/heads/main changes,
+  which happens on every successful `git pull` or merge to main.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.shawnpetros.smithy.deploy</string>
+
+  <!-- launchd agents do not inherit the user's login-shell PATH; set it explicitly. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/shawnpetros/projects/smithy/scripts/deploy.sh</string>
+  </array>
+
+  <key>WatchPaths</key>
+  <array>
+    <string>/Users/shawnpetros/projects/smithy/.git/refs/heads/main</string>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/smithy-deploy.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/smithy-deploy.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
