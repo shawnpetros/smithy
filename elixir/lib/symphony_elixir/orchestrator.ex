@@ -241,6 +241,7 @@ defmodule SymphonyElixir.Orchestrator do
         # daemon_halted? returned true; idle this poll
         Logger.warning("Daemon halted by #{@halt_all_label} label; skipping dispatch")
         state
+
       {:error, :missing_linear_api_token} ->
         Logger.error("Linear API token missing in WORKFLOW.md")
         state
@@ -302,32 +303,28 @@ defmodule SymphonyElixir.Orchestrator do
         state
 
       {:ok, halted_issues} ->
-        Enum.reduce(halted_issues, state, fn issue, state_acc ->
-          labels = issue_labels(issue)
-
-          cond do
-            @halt_all_label in labels ->
-              Logger.warning(
-                "Operator applied #{@halt_all_label} via ticket #{issue.identifier}; draining all workers"
-              )
-
-              drain_all_workers(state_acc)
-
-            @halt_label in labels and Map.has_key?(state_acc.running, issue.id) ->
-              Logger.warning(
-                "Operator applied #{@halt_label} to ticket #{issue.identifier}; terminating worker"
-              )
-
-              terminate_running_issue(state_acc, issue.id, false)
-
-            true ->
-              state_acc
-          end
-        end)
+        Enum.reduce(halted_issues, state, &apply_killswitch_to_issue/2)
 
       {:error, reason} ->
         Logger.warning("Killswitch label fetch failed: #{inspect(reason)}; proceeding without")
         state
+    end
+  end
+
+  defp apply_killswitch_to_issue(issue, state_acc) do
+    labels = issue_labels(issue)
+
+    cond do
+      @halt_all_label in labels ->
+        Logger.warning("Operator applied #{@halt_all_label} via ticket #{issue.identifier}; draining all workers")
+        drain_all_workers(state_acc)
+
+      @halt_label in labels and Map.has_key?(state_acc.running, issue.id) ->
+        Logger.warning("Operator applied #{@halt_label} to ticket #{issue.identifier}; terminating worker")
+        terminate_running_issue(state_acc, issue.id, false)
+
+      true ->
+        state_acc
     end
   end
 

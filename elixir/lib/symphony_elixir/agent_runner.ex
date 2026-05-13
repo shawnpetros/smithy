@@ -427,10 +427,8 @@ defmodule SymphonyElixir.AgentRunner do
     Process.put(@turn_usage_pdict_key, %{
       input_tokens: current.input_tokens + Map.get(usage, "input_tokens", 0),
       output_tokens: current.output_tokens + Map.get(usage, "output_tokens", 0),
-      cache_read_tokens:
-        current.cache_read_tokens + Map.get(usage, "cache_read_input_tokens", 0),
-      cache_creation_tokens:
-        current.cache_creation_tokens + Map.get(usage, "cache_creation_input_tokens", 0),
+      cache_read_tokens: current.cache_read_tokens + Map.get(usage, "cache_read_input_tokens", 0),
+      cache_creation_tokens: current.cache_creation_tokens + Map.get(usage, "cache_creation_input_tokens", 0),
       cost_usd: current.cost_usd
     })
   end
@@ -640,11 +638,23 @@ defmodule SymphonyElixir.AgentRunner do
           run_id: run_id
         )
 
-        Logger.info("Completed Claude builder turn for #{issue_context(issue)} session_id=#{summary[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
+        Logger.info(
+          "Completed Claude builder turn for #{issue_context(issue)} " <>
+            "session_id=#{summary[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}"
+        )
 
         case continue_with_issue?(issue, issue_state_fetcher, :builder) do
           {:continue, refreshed_issue} when turn_number < max_turns ->
-            do_run_claude_turns(session, workspace, refreshed_issue, recipient, opts, issue_state_fetcher, turn_number + 1, max_turns)
+            do_run_claude_turns(
+              session,
+              workspace,
+              refreshed_issue,
+              recipient,
+              opts,
+              issue_state_fetcher,
+              turn_number + 1,
+              max_turns
+            )
 
           {:continue, _} ->
             Logger.info("Reached agent.max_turns for #{issue_context(issue)} (claude) with issue still active; returning control to orchestrator")

@@ -48,6 +48,39 @@ alone does not give you. Do not run tests; the builder ran them. If the
 diff says tests pass and the change looks correct, take that at face
 value unless you have a specific reason to doubt it.
 
+## TUI evidence check
+
+Before grading any finding, check whether the diff touches TUI or CLI display files:
+
+- `wrapper/lib/smithy/tui.ex`
+- `wrapper/lib/smithy/commands/status_cmd.ex`
+- `wrapper/lib/smithy/commands/dashboard_cmd.ex`
+- `wrapper/lib/smithy/dashboard.ex`
+- `wrapper/lib/smithy/status.ex`
+- `elixir/lib/symphony_elixir/status_dashboard.ex`
+- `elixir/lib/symphony_elixir_web/live/dashboard_live.ex`
+
+If any of those paths appear in the diff, the PR **must** satisfy all three:
+
+1. A `.tape` file committed under `verification/<ticket-id>.tape` (named after the ticket, not a generic smoke tape)
+2. A `.tape` file path linked in the PR body as an actual URL or markdown link (not just a text mention of the filename)
+3. A rendered GIF uploaded to GitHub and linked in the PR body as an HTTPS URL (run `make tui-upload TAPE=verification/<ticket-id>.tape PR=<pr-number>` or drag-and-drop the GIF into a GitHub PR comment to get a hosted URL) - a bare text mention of a `.gif` filename or a relative path does not satisfy this condition
+
+Absence of any individual item is a separate `blocker` finding. Write each missing item as its own entry:
+
+```yaml
+- finding: "TUI files changed but no ticket-specific tape committed at verification/<ticket-id>.tape"
+  grade: blocker
+- finding: "TUI files changed but PR body does not link the .tape file as an actual URL or markdown link"
+  grade: blocker
+- finding: "TUI files changed but rendered GIF has not been attached to the PR and linked as a GitHub-hosted URL"
+  grade: blocker
+```
+
+Include only the findings that apply. A generic `verification/smoke.tape` does not satisfy condition 1 - the tape must be named after the ticket ID (e.g. `verification/per-218.tape`).
+
+Do not promote this to `polish` or `future` — the prior incident that motivated this check was a TUI that compiled and passed snapshot tests but was interactively broken (q did not quit, scroll did not work, no color). Static analysis cannot catch this class of bug; rendered video evidence is the only acceptable signal.
+
 ## Grade every finding
 
 Every issue you would raise must be classified as exactly one of:

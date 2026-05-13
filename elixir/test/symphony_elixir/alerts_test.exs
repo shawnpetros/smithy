@@ -58,7 +58,7 @@ defmodule SymphonyElixir.AlertsTest do
       Application.put_env(
         :symphony_elixir,
         :telegram_req_options,
-        [plug: {Req.Test, SymphonyElixir.Alerts.Telegram}]
+        plug: {Req.Test, SymphonyElixir.Alerts.Telegram}
       )
 
       assert {:ok, 77} = Telegram.send("hello world")
@@ -79,7 +79,7 @@ defmodule SymphonyElixir.AlertsTest do
       Application.put_env(
         :symphony_elixir,
         :telegram_req_options,
-        [plug: {Req.Test, SymphonyElixir.Alerts.Telegram}]
+        plug: {Req.Test, SymphonyElixir.Alerts.Telegram}
       )
 
       assert {:error, {:api_error, 400, _}} = Telegram.send("fail test")

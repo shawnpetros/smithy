@@ -1,0 +1,75 @@
+name: tui-evidence-gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  tui-evidence-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect TUI file changes
+        id: tui
+        run: |
+          TUI_PATHS="
+            wrapper/lib/smithy/tui.ex
+            wrapper/lib/smithy/commands/status_cmd.ex
+            wrapper/lib/smithy/commands/dashboard_cmd.ex
+            wrapper/lib/smithy/dashboard.ex
+            wrapper/lib/smithy/status.ex
+            elixir/lib/symphony_elixir/status_dashboard.ex
+            elixir/lib/symphony_elixir_web/live/dashboard_live.ex
+          "
+          CHANGED=$(git diff "origin/${{ github.base_ref }}...HEAD" --name-only)
+          TUI_TOUCHED=false
+          for path in $TUI_PATHS; do
+            [ -z "$path" ] && continue
+            if echo "$CHANGED" | grep -qF "$path"; then
+              echo "TUI file touched: $path"
+              TUI_TOUCHED=true
+            fi
+          done
+          echo "tui_touched=$TUI_TOUCHED" >> "$GITHUB_OUTPUT"
+
+      - name: Verify ticket-specific tape file exists
+        if: steps.tui.outputs.tui_touched == 'true'
+        run: |
+          BRANCH="${{ github.head_ref }}"
+          TICKET_ID=$(echo "$BRANCH" | grep -oiE '[a-z]+-[0-9]+' | head -1 | tr '[:upper:]' '[:lower:]')
+          if [ -z "$TICKET_ID" ]; then
+            echo "::error::Could not extract a ticket ID from branch name '$BRANCH'. Branch must contain an ID like per-218."
+            exit 1
+          fi
+          TAPE_PATH="verification/${TICKET_ID}.tape"
+          if [ ! -f "$TAPE_PATH" ]; then
+            echo "::error::TUI files changed but no ticket-specific tape found at $TAPE_PATH. Commit a VHS tape for this ticket before merging."
+            exit 1
+          fi
+          echo "Tape evidence found: $TAPE_PATH"
+
+      - name: Verify tape and GIF linked in PR body
+        if: steps.tui.outputs.tui_touched == 'true'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Require actual HTTPS URLs - relative paths and bare filenames do not satisfy
+          # reviewer-visible evidence. The GIF must be GitHub-hosted (uploaded via web UI
+          # or 'make tui-upload'), not a local file reference.
+          MISSING=()
+          if ! echo "$PR_BODY" | grep -qiE 'https?://[^ )]*\.tape'; then
+            MISSING+=(".tape file link (must be an HTTPS URL, e.g. GitHub blob link to the committed tape)")
+          fi
+          if ! echo "$PR_BODY" | grep -qiE 'https?://[^ )]*\.(gif|mp4)'; then
+            MISSING+=(".gif or .mp4 link (must be an HTTPS URL - run 'make tui-upload TAPE=verification/<ticket-id>.tape PR=<pr-number>' to get a GitHub-hosted URL)")
+          fi
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            printf '::error::TUI files changed but PR body is missing: %s. Upload the rendered GIF via '\''make tui-upload'\'' and add GitHub-hosted HTTPS URLs for both the tape and GIF in the PR description.\n' "${MISSING[*]}"
+            exit 1
+          fi
+          echo "Tape and GIF evidence links verified in PR body."

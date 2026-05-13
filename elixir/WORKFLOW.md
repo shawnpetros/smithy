@@ -352,6 +352,16 @@ Use this exact structure for the persistent workpad comment and keep it updated 
 
 - [ ] targeted tests: `<command>`
 
+### TUI Evidence
+
+_Required for any diff touching TUI or CLI display files. Omit section only if this ticket has no TUI-shaped changes._
+
+- [ ] Tape committed: `verification/<ticket-id>.tape`
+- [ ] GIF rendered: `make tui-verify TAPE=verification/<ticket-id>.tape`
+- [ ] GIF uploaded: `make tui-upload TAPE=verification/<ticket-id>.tape PR=<pr-number>` (outputs a GitHub-hosted URL via a draft release asset)
+- [ ] Tape linked in PR body (GitHub blob URL or raw link to committed tape)
+- [ ] GIF linked in PR body (GitHub-hosted URL from the upload above)
+
 ### Notes
 
 - <short progress note with timestamp>

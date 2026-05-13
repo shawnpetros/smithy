@@ -312,6 +312,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
     """
   end
 
+  @spec rl_card(map()) :: Phoenix.LiveView.Rendered.t()
   def rl_card(assigns) do
     ~H"""
     <% status = rl_status(@window, @credits) %>

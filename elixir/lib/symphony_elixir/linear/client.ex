@@ -232,38 +232,46 @@ defmodule SymphonyElixir.Linear.Client do
 
       labels ->
         tracker = Config.settings!().tracker
-        project_slug = tracker.project_slug
+        fetch_labeled_issues(tracker, labels)
+    end
+  end
 
-        cond do
-          is_nil(tracker.api_key) ->
-            {:error, :missing_linear_api_token}
+  defp fetch_labeled_issues(tracker, labels) do
+    project_slug = tracker.project_slug
 
-          is_nil(project_slug) ->
-            {:error, :missing_linear_project_slug}
+    cond do
+      is_nil(tracker.api_key) ->
+        {:error, :missing_linear_api_token}
 
-          true ->
-            variables = %{projectSlug: project_slug, labelNames: labels, first: 50}
+      is_nil(project_slug) ->
+        {:error, :missing_linear_project_slug}
 
-            with {:ok, response} <- graphql(@label_lookup_query, variables) do
-              nodes = get_in(response, ["data", "issues", "nodes"]) || []
+      true ->
+        query_labeled_issues(project_slug, labels)
+    end
+  end
 
-              issues =
-                Enum.map(nodes, fn node ->
-                  %Issue{
-                    id: node["id"],
-                    identifier: node["identifier"],
-                    state: get_in(node, ["state", "name"]),
-                    labels:
-                      node
-                      |> get_in(["labels", "nodes"])
-                      |> List.wrap()
-                      |> Enum.map(& &1["name"])
-                  }
-                end)
+  defp query_labeled_issues(project_slug, labels) do
+    variables = %{projectSlug: project_slug, labelNames: labels, first: 50}
 
-              {:ok, issues}
-            end
-        end
+    with {:ok, response} <- graphql(@label_lookup_query, variables) do
+      nodes = get_in(response, ["data", "issues", "nodes"]) || []
+
+      issues =
+        Enum.map(nodes, fn node ->
+          %Issue{
+            id: node["id"],
+            identifier: node["identifier"],
+            state: get_in(node, ["state", "name"]),
+            labels:
+              node
+              |> get_in(["labels", "nodes"])
+              |> List.wrap()
+              |> Enum.map(& &1["name"])
+          }
+        end)
+
+      {:ok, issues}
     end
   end
 

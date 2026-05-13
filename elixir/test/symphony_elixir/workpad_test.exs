@@ -498,6 +498,9 @@ defmodule SymphonyElixir.WorkpadTest do
       assert body =~ "- [ ] Criterion 1"
       assert body =~ "### Validation"
       assert body =~ "- [ ] targeted tests: `<command>`"
+      assert body =~ "### TUI Evidence"
+      assert body =~ "- [ ] Tape committed: `verification/<ticket-id>.tape`"
+      assert body =~ "- [ ] GIF rendered: `make tui-verify TAPE=verification/<ticket-id>.tape`"
       assert body =~ "### Notes"
       # Confusions omitted when empty (per WORKFLOW.md guidance).
       refute body =~ "### Confusions"
