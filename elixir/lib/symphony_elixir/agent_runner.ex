@@ -417,6 +417,47 @@ defmodule SymphonyElixir.AgentRunner do
     end
   end
 
+  defp claude_message_handler(recipient, issue) do
+    fn message ->
+      capture_turn_usage(message)
+
+      case message do
+        {:rate_limit, rate_limit_info} when is_map(rate_limit_info) ->
+          send_claude_rate_limit(recipient, issue, rate_limit_info)
+
+        %{event: :bytes_received, timestamp: timestamp} ->
+          send_claude_heartbeat(recipient, issue, timestamp)
+
+        _ ->
+          :ok
+      end
+    end
+  end
+
+  defp send_claude_heartbeat(recipient, %Issue{id: issue_id}, timestamp)
+       when is_binary(issue_id) and is_pid(recipient) do
+    send(recipient, {:claude_heartbeat, issue_id, timestamp})
+    :ok
+  end
+
+  defp send_claude_heartbeat(_recipient, _issue, _timestamp), do: :ok
+
+  defp send_claude_rate_limit(recipient, %Issue{id: issue_id}, rate_limit_info)
+       when is_binary(issue_id) and is_pid(recipient) do
+    send(recipient, {:claude_rate_limit, issue_id, rate_limit_info})
+    :ok
+  end
+
+  defp send_claude_rate_limit(_recipient, _issue, _info), do: :ok
+
+  defp send_claude_turn_end(recipient, %Issue{id: issue_id}, usage)
+       when is_binary(issue_id) and is_pid(recipient) do
+    send(recipient, {:claude_turn_end, issue_id, usage})
+    :ok
+  end
+
+  defp send_claude_turn_end(_recipient, _issue, _usage), do: :ok
+
   # PER-157: harvest token usage + cost from runtime events into the process
   # dict so the next :turn_end emit can include them. Called on every event
   # from claude/codex AppServer via the wrapped on_message callback. Same
@@ -427,10 +468,8 @@ defmodule SymphonyElixir.AgentRunner do
     Process.put(@turn_usage_pdict_key, %{
       input_tokens: current.input_tokens + Map.get(usage, "input_tokens", 0),
       output_tokens: current.output_tokens + Map.get(usage, "output_tokens", 0),
-      cache_read_tokens:
-        current.cache_read_tokens + Map.get(usage, "cache_read_input_tokens", 0),
-      cache_creation_tokens:
-        current.cache_creation_tokens + Map.get(usage, "cache_creation_input_tokens", 0),
+      cache_read_tokens: current.cache_read_tokens + Map.get(usage, "cache_read_input_tokens", 0),
+      cache_creation_tokens: current.cache_creation_tokens + Map.get(usage, "cache_creation_input_tokens", 0),
       cost_usd: current.cost_usd
     })
   end
@@ -618,7 +657,7 @@ defmodule SymphonyElixir.AgentRunner do
 
     reset_turn_usage()
     turn_started_at = System.monotonic_time(:millisecond)
-    turn_result = ClaudeAppServer.run_turn(session, prompt, issue, on_message: codex_message_handler(recipient, issue))
+    turn_result = ClaudeAppServer.run_turn(session, prompt, issue, on_message: claude_message_handler(recipient, issue))
     duration_ms = System.monotonic_time(:millisecond) - turn_started_at
 
     case turn_result do
@@ -639,6 +678,15 @@ defmodule SymphonyElixir.AgentRunner do
           outcome: :success,
           run_id: run_id
         )
+
+        send_claude_turn_end(recipient, issue, %{
+          input_tokens: usage.input_tokens,
+          output_tokens: usage.output_tokens,
+          cache_read_tokens: usage.cache_read_tokens,
+          cache_creation_tokens: usage.cache_creation_tokens,
+          cost_usd: usage.cost_usd,
+          session_id: summary[:session_id]
+        })
 
         Logger.info("Completed Claude builder turn for #{issue_context(issue)} session_id=#{summary[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
 
