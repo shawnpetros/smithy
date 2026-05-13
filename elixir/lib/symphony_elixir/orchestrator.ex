@@ -246,12 +246,9 @@ defmodule SymphonyElixir.Orchestrator do
             input_tokens: Map.get(running_entry, :input_tokens, 0) + input,
             output_tokens: Map.get(running_entry, :output_tokens, 0) + output,
             total_tokens: Map.get(running_entry, :total_tokens, 0) + total,
-            last_reported_input_tokens:
-              max(Map.get(running_entry, :last_reported_input_tokens, 0), input),
-            last_reported_output_tokens:
-              max(Map.get(running_entry, :last_reported_output_tokens, 0), output),
-            last_reported_total_tokens:
-              max(Map.get(running_entry, :last_reported_total_tokens, 0), total)
+            last_reported_input_tokens: max(Map.get(running_entry, :last_reported_input_tokens, 0), input),
+            last_reported_output_tokens: max(Map.get(running_entry, :last_reported_output_tokens, 0), output),
+            last_reported_total_tokens: max(Map.get(running_entry, :last_reported_total_tokens, 0), total)
           })
 
         state = apply_runtime_token_delta(state, token_delta)
@@ -314,6 +311,7 @@ defmodule SymphonyElixir.Orchestrator do
         # daemon_halted? returned true; idle this poll
         Logger.warning("Daemon halted by #{@halt_all_label} label; skipping dispatch")
         state
+
       {:error, :missing_linear_api_token} ->
         Logger.error("Linear API token missing in WORKFLOW.md")
         state
@@ -380,16 +378,12 @@ defmodule SymphonyElixir.Orchestrator do
 
           cond do
             @halt_all_label in labels ->
-              Logger.warning(
-                "Operator applied #{@halt_all_label} via ticket #{issue.identifier}; draining all workers"
-              )
+              Logger.warning("Operator applied #{@halt_all_label} via ticket #{issue.identifier}; draining all workers")
 
               drain_all_workers(state_acc)
 
             @halt_label in labels and Map.has_key?(state_acc.running, issue.id) ->
-              Logger.warning(
-                "Operator applied #{@halt_label} to ticket #{issue.identifier}; terminating worker"
-              )
+              Logger.warning("Operator applied #{@halt_label} to ticket #{issue.identifier}; terminating worker")
 
               terminate_running_issue(state_acc, issue.id, false)
 

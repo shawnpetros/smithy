@@ -468,10 +468,8 @@ defmodule SymphonyElixir.AgentRunner do
     Process.put(@turn_usage_pdict_key, %{
       input_tokens: current.input_tokens + Map.get(usage, "input_tokens", 0),
       output_tokens: current.output_tokens + Map.get(usage, "output_tokens", 0),
-      cache_read_tokens:
-        current.cache_read_tokens + Map.get(usage, "cache_read_input_tokens", 0),
-      cache_creation_tokens:
-        current.cache_creation_tokens + Map.get(usage, "cache_creation_input_tokens", 0),
+      cache_read_tokens: current.cache_read_tokens + Map.get(usage, "cache_read_input_tokens", 0),
+      cache_creation_tokens: current.cache_creation_tokens + Map.get(usage, "cache_creation_input_tokens", 0),
       cost_usd: current.cost_usd
     })
   end
