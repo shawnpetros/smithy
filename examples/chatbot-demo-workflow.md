@@ -96,7 +96,7 @@ This flow is the standard Symphony flow with one Anvil-specific change: completi
 1. Fetch the issue by ticket ID via the `linear_graphql` tool.
 2. Read the current state.
 3. Route:
-   - `Todo`: transition to `In Progress`, ensure workpad comment exists, then start execution.
+   - `Todo`: transition to `In Progress`, then start execution (Step 1 handles workpad find/create).
    - `In Progress`: resume from current workpad comment.
    - `Adversarial Review`: do nothing. Anvil owns this state.
    - `In Review`: wait and poll. Do not modify.
@@ -107,7 +107,7 @@ This flow is the standard Symphony flow with one Anvil-specific change: completi
 
 1. Find or create the persistent scratchpad comment with header `## Codex Workpad`. Reuse if present.
 2. Persist the workpad comment ID. Only write progress to that ID. Do NOT post separate progress comments.
-3. Top of workpad: an environment stamp as a code fence with format `<hostname>:<abs-workdir>@<short-sha>`.
+3. Top of workpad: an environment stamp as a code fence with format `<repo-slug>:workspaces/<ticket-id>@<short-sha>`.
 4. Reconcile the workpad before new edits: check off done items, fix the plan, ensure `Acceptance Criteria` and `Validation` are current.
 
 ## Step 2: Plan and reproduce
@@ -170,7 +170,7 @@ Symphony does not do anything during `Adversarial Review`. Do not poll, do not e
 ## Codex Workpad
 
 ```text
-<hostname>:<abs-path>@<short-sha>
+<repo-slug>:workspaces/<ticket-id>@<short-sha>
 ```
 
 ### Plan
