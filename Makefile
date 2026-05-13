@@ -6,7 +6,7 @@ PROJECTS := wrapper elixir
 SMITHY_BIN := $(CURDIR)/wrapper/bin/smithy
 SYMPHONY_BIN := $(CURDIR)/elixir/bin/symphony
 
-.PHONY: help install uninstall clean test rebuild check-mise check-runtimes trust deps build install-bin verify-install next-steps tui-verify
+.PHONY: help install uninstall clean test rebuild check-mise check-runtimes trust deps build install-bin verify-install next-steps tui-verify tui-upload
 .NOTPARALLEL:
 
 help:
@@ -155,3 +155,36 @@ tui-verify: check-mise
 	@TAPE_OUT="$$(dirname "$(TAPE)")/$$(basename "$(TAPE)" .tape).gif"; \
 	echo "==> vhs $(TAPE) -o $$TAPE_OUT"; \
 	"$(MISE)" exec -- vhs "$(TAPE)" -o "$$TAPE_OUT"
+
+tui-upload:
+	@if [ -z "$(TAPE)" ]; then \
+		echo "Usage: make tui-upload TAPE=<path-to-.tape> [PR=<pr-number>]" >&2; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(TAPE)" ]; then \
+		echo "Tape file not found: $(TAPE)" >&2; \
+		exit 1; \
+	fi
+	@GIF_PATH="$$(dirname "$(TAPE)")/$$(basename "$(TAPE)" .tape).gif"; \
+	if [ ! -f "$$GIF_PATH" ]; then \
+		echo "GIF not found at $$GIF_PATH. Run 'make tui-verify TAPE=$(TAPE)' first." >&2; \
+		exit 1; \
+	fi; \
+	TICKET_ID="$$(basename "$(TAPE)" .tape)"; \
+	TAG="tui-evidence-$$TICKET_ID"; \
+	GIF_NAME="$$(basename "$$GIF_PATH")"; \
+	gh release create "$$TAG" --title "TUI evidence: $$TICKET_ID" \
+		--notes "Rendered VHS GIF for $$TICKET_ID" --draft 2>/dev/null || true; \
+	gh release upload "$$TAG" "$$GIF_PATH" --clobber; \
+	GIF_URL="$$(gh release view "$$TAG" --json assets \
+		-q ".assets[] | select(.name == \"$$GIF_NAME\") | .browserDownloadUrl")"; \
+	echo ""; \
+	echo "==> GIF uploaded: $$GIF_URL"; \
+	echo ""; \
+	echo "Add to PR body:"; \
+	printf '![TUI evidence](%s)\n' "$$GIF_URL"; \
+	if [ -n "$(PR)" ]; then \
+		echo ""; \
+		echo "==> Adding GIF comment to PR $(PR)"; \
+		gh pr comment "$(PR)" --body "$$(printf '![TUI evidence](%s)' "$$GIF_URL")"; \
+	fi

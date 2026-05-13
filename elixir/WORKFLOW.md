@@ -358,7 +358,7 @@ _Required for any diff touching TUI or CLI display files. Omit section only if t
 
 - [ ] Tape committed: `verification/<ticket-id>.tape`
 - [ ] GIF rendered: `make tui-verify TAPE=verification/<ticket-id>.tape`
-- [ ] GIF uploaded/attached to PR: `gh pr comment <PR_NUMBER> --body "TUI evidence" -F verification/<ticket-id>.gif` (produces a GitHub-hosted URL)
+- [ ] GIF uploaded: `make tui-upload TAPE=verification/<ticket-id>.tape PR=<pr-number>` (outputs a GitHub-hosted URL via a draft release asset)
 - [ ] Tape linked in PR body (GitHub blob URL or raw link to committed tape)
 - [ ] GIF linked in PR body (GitHub-hosted URL from the upload above)
 

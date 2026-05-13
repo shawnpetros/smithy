@@ -17,6 +17,7 @@ defmodule SymphonyElixir.Workpad do
     * `### Plan` (builder owns)
     * `### Acceptance Criteria` (builder owns)
     * `### Validation` (builder owns)
+    * `### TUI Evidence` (builder owns; omit only for non-TUI-touching diffs)
     * `### Notes` (builder owns)
     * `### Adversarial Review` (reviewer appends, dated subsections)
     * `### Confusions` (any agent may append)
@@ -51,6 +52,7 @@ defmodule SymphonyElixir.Workpad do
     plan: "Plan",
     acceptance_criteria: "Acceptance Criteria",
     validation: "Validation",
+    tui_evidence: "TUI Evidence",
     notes: "Notes",
     adversarial_review: "Adversarial Review",
     confusions: "Confusions"
@@ -60,6 +62,7 @@ defmodule SymphonyElixir.Workpad do
     :plan,
     :acceptance_criteria,
     :validation,
+    :tui_evidence,
     :notes,
     :adversarial_review,
     :confusions
@@ -71,6 +74,7 @@ defmodule SymphonyElixir.Workpad do
           :plan
           | :acceptance_criteria
           | :validation
+          | :tui_evidence
           | :notes
           | :adversarial_review
           | :confusions
@@ -217,6 +221,16 @@ defmodule SymphonyElixir.Workpad do
     plan_items = get_var(vars, :plan_items, ["1. Parent task"])
     acceptance_criteria = get_var(vars, :acceptance_criteria, ["Criterion 1"])
     validation_items = get_var(vars, :validation_items, ["targeted tests: `<command>`"])
+
+    tui_evidence_items =
+      get_var(vars, :tui_evidence_items, [
+        "Tape committed: `verification/<ticket-id>.tape`",
+        "GIF rendered: `make tui-verify TAPE=verification/<ticket-id>.tape`",
+        "GIF uploaded: `make tui-upload TAPE=verification/<ticket-id>.tape PR=<pr-number>`",
+        "Tape linked in PR body (GitHub blob URL)",
+        "GIF linked in PR body (GitHub-hosted URL from the upload above)"
+      ])
+
     notes = get_var(vars, :notes, [])
     confusions = get_var(vars, :confusions, [])
 
@@ -236,6 +250,11 @@ defmodule SymphonyElixir.Workpad do
       "### Validation",
       "",
       render_checklist(validation_items),
+      "### TUI Evidence",
+      "",
+      "_Required for any diff touching TUI or CLI display files. Omit section if no TUI-shaped changes._",
+      "",
+      render_checklist(tui_evidence_items),
       "### Notes",
       "",
       render_bullets_or_placeholder(notes, "- <short progress note with timestamp>")

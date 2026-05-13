@@ -58,17 +58,18 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          # Require actual URLs or markdown links, not bare text mentions of filenames.
-          # Valid forms: https://... ending in .tape, or ](path.tape) markdown link syntax.
+          # Require actual HTTPS URLs - relative paths and bare filenames do not satisfy
+          # reviewer-visible evidence. The GIF must be GitHub-hosted (uploaded via web UI
+          # or 'make tui-upload'), not a local file reference.
           MISSING=()
-          if ! echo "$PR_BODY" | grep -qiE '(https?://[^ )]*\.tape|\]\([^)]*\.tape[^)]*\))'; then
-            MISSING+=(".tape file link (must be an actual URL or markdown link, not plain text)")
+          if ! echo "$PR_BODY" | grep -qiE 'https?://[^ )]*\.tape'; then
+            MISSING+=(".tape file link (must be an HTTPS URL, e.g. GitHub blob link to the committed tape)")
           fi
-          if ! echo "$PR_BODY" | grep -qiE '(https?://[^ )]*\.(gif|mp4)|\]\([^)]*\.(gif|mp4)[^)]*\))'; then
-            MISSING+=(".gif or .mp4 link (must be an actual URL or markdown link - attach the GIF to the PR first)")
+          if ! echo "$PR_BODY" | grep -qiE 'https?://[^ )]*\.(gif|mp4)'; then
+            MISSING+=(".gif or .mp4 link (must be an HTTPS URL - run 'make tui-upload TAPE=verification/<ticket-id>.tape PR=<pr-number>' to get a GitHub-hosted URL)")
           fi
           if [ ${#MISSING[@]} -gt 0 ]; then
-            printf '::error::TUI files changed but PR body is missing: %s. Attach the rendered GIF to the PR (gh pr comment <PR> --body "TUI evidence" -F <gif>) and add a GitHub-hosted URL for both the tape and GIF in the PR description.\n' "${MISSING[*]}"
+            printf '::error::TUI files changed but PR body is missing: %s. Upload the rendered GIF via '\''make tui-upload'\'' and add GitHub-hosted HTTPS URLs for both the tape and GIF in the PR description.\n' "${MISSING[*]}"
             exit 1
           fi
           echo "Tape and GIF evidence links verified in PR body."

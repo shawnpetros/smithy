@@ -64,7 +64,7 @@ If any of those paths appear in the diff, the PR **must** satisfy all three:
 
 1. A `.tape` file committed under `verification/<ticket-id>.tape` (named after the ticket, not a generic smoke tape)
 2. A `.tape` file path linked in the PR body as an actual URL or markdown link (not just a text mention of the filename)
-3. A rendered GIF attached to the PR (via `gh pr comment <PR> --body "TUI evidence" -F <gif>` or uploaded through the GitHub UI) and linked in the PR body as a GitHub-hosted URL - a bare text mention of a `.gif` filename does not satisfy this condition
+3. A rendered GIF uploaded to GitHub and linked in the PR body as an HTTPS URL (run `make tui-upload TAPE=verification/<ticket-id>.tape PR=<pr-number>` or drag-and-drop the GIF into a GitHub PR comment to get a hosted URL) - a bare text mention of a `.gif` filename or a relative path does not satisfy this condition
 
 Absence of any individual item is a separate `blocker` finding. Write each missing item as its own entry:
 

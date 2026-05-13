@@ -638,11 +638,23 @@ defmodule SymphonyElixir.AgentRunner do
           run_id: run_id
         )
 
-        Logger.info("Completed Claude builder turn for #{issue_context(issue)} session_id=#{summary[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
+        Logger.info(
+          "Completed Claude builder turn for #{issue_context(issue)} " <>
+            "session_id=#{summary[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}"
+        )
 
         case continue_with_issue?(issue, issue_state_fetcher, :builder) do
           {:continue, refreshed_issue} when turn_number < max_turns ->
-            do_run_claude_turns(session, workspace, refreshed_issue, recipient, opts, issue_state_fetcher, turn_number + 1, max_turns)
+            do_run_claude_turns(
+              session,
+              workspace,
+              refreshed_issue,
+              recipient,
+              opts,
+              issue_state_fetcher,
+              turn_number + 1,
+              max_turns
+            )
 
           {:continue, _} ->
             Logger.info("Reached agent.max_turns for #{issue_context(issue)} (claude) with issue still active; returning control to orchestrator")
