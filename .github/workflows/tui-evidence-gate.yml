@@ -58,15 +58,17 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
+          # Require actual URLs or markdown links, not bare text mentions of filenames.
+          # Valid forms: https://... ending in .tape, or ](path.tape) markdown link syntax.
           MISSING=()
-          if ! echo "$PR_BODY" | grep -qiE '\.tape'; then
-            MISSING+=(".tape file link")
+          if ! echo "$PR_BODY" | grep -qiE '(https?://[^ )]*\.tape|\]\([^)]*\.tape[^)]*\))'; then
+            MISSING+=(".tape file link (must be an actual URL or markdown link, not plain text)")
           fi
-          if ! echo "$PR_BODY" | grep -qiE '\.(gif|mp4)'; then
-            MISSING+=(".gif or .mp4 link")
+          if ! echo "$PR_BODY" | grep -qiE '(https?://[^ )]*\.(gif|mp4)|\]\([^)]*\.(gif|mp4)[^)]*\))'; then
+            MISSING+=(".gif or .mp4 link (must be an actual URL or markdown link - attach the GIF to the PR first)")
           fi
           if [ ${#MISSING[@]} -gt 0 ]; then
-            printf '::error::TUI files changed but PR body is missing: %s. Link both the verification tape and rendered GIF in the PR description.\n' "${MISSING[*]}"
+            printf '::error::TUI files changed but PR body is missing: %s. Attach the rendered GIF to the PR (gh pr comment <PR> --body "TUI evidence" -F <gif>) and add a GitHub-hosted URL for both the tape and GIF in the PR description.\n' "${MISSING[*]}"
             exit 1
           fi
-          echo "Tape and GIF evidence found in PR body."
+          echo "Tape and GIF evidence links verified in PR body."

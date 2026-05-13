@@ -63,17 +63,17 @@ Before grading any finding, check whether the diff touches TUI or CLI display fi
 If any of those paths appear in the diff, the PR **must** satisfy all three:
 
 1. A `.tape` file committed under `verification/<ticket-id>.tape` (named after the ticket, not a generic smoke tape)
-2. A `.tape` file path linked in the PR body
-3. A rendered GIF linked in the PR body (produced by `make tui-verify TAPE=<path>`)
+2. A `.tape` file path linked in the PR body as an actual URL or markdown link (not just a text mention of the filename)
+3. A rendered GIF attached to the PR (via `gh pr comment <PR> --body "TUI evidence" -F <gif>` or uploaded through the GitHub UI) and linked in the PR body as a GitHub-hosted URL - a bare text mention of a `.gif` filename does not satisfy this condition
 
 Absence of any individual item is a separate `blocker` finding. Write each missing item as its own entry:
 
 ```yaml
 - finding: "TUI files changed but no ticket-specific tape committed at verification/<ticket-id>.tape"
   grade: blocker
-- finding: "TUI files changed but PR body does not link the .tape file"
+- finding: "TUI files changed but PR body does not link the .tape file as an actual URL or markdown link"
   grade: blocker
-- finding: "TUI files changed but PR body does not link a rendered .gif or .mp4"
+- finding: "TUI files changed but rendered GIF has not been attached to the PR and linked as a GitHub-hosted URL"
   grade: blocker
 ```
 
