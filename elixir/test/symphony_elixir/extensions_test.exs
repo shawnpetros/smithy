@@ -208,6 +208,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert Config.settings!().tracker.kind == "memory"
     assert SymphonyElixir.Tracker.adapter() == Memory
     assert {:ok, [^issue, ^halted_issue]} = SymphonyElixir.Tracker.fetch_candidate_issues()
+
     assert {:ok, [^issue, ^halted_issue]} =
              SymphonyElixir.Tracker.fetch_issues_by_states([" in progress ", 42])
 
