@@ -241,6 +241,7 @@ defmodule SymphonyElixir.Orchestrator do
         # daemon_halted? returned true; idle this poll
         Logger.warning("Daemon halted by #{@halt_all_label} label; skipping dispatch")
         state
+
       {:error, :missing_linear_api_token} ->
         Logger.error("Linear API token missing in WORKFLOW.md")
         state
@@ -307,16 +308,12 @@ defmodule SymphonyElixir.Orchestrator do
 
           cond do
             @halt_all_label in labels ->
-              Logger.warning(
-                "Operator applied #{@halt_all_label} via ticket #{issue.identifier}; draining all workers"
-              )
+              Logger.warning("Operator applied #{@halt_all_label} via ticket #{issue.identifier}; draining all workers")
 
               drain_all_workers(state_acc)
 
             @halt_label in labels and Map.has_key?(state_acc.running, issue.id) ->
-              Logger.warning(
-                "Operator applied #{@halt_label} to ticket #{issue.identifier}; terminating worker"
-              )
+              Logger.warning("Operator applied #{@halt_label} to ticket #{issue.identifier}; terminating worker")
 
               terminate_running_issue(state_acc, issue.id, false)
 
