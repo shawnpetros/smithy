@@ -45,7 +45,7 @@ agents:
     mcp: []
   reviewers:
     - mode: reviewer
-      runtime: claude_code
+      runtime: codex
       persona: reviewer.md
       tier: opus
       mcp: []
