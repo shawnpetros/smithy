@@ -107,7 +107,7 @@ This flow is the standard Symphony flow with one Anvil-specific change: completi
 
 1. Find or create the persistent scratchpad comment with header `## Codex Workpad`. Reuse if present.
 2. Persist the workpad comment ID. Only write progress to that ID. Do NOT post separate progress comments.
-3. Top of workpad: an environment stamp as a code fence with format `<hostname>:<abs-workdir>@<short-sha>`.
+3. Top of workpad: an environment stamp as a code fence with format `<repo-slug>:workspaces/<ticket-id>@<short-sha>`.
 4. Reconcile the workpad before new edits: check off done items, fix the plan, ensure `Acceptance Criteria` and `Validation` are current.
 
 ## Step 2: Plan and reproduce
@@ -170,7 +170,7 @@ Symphony does not do anything during `Adversarial Review`. Do not poll, do not e
 ## Codex Workpad
 
 ```text
-<hostname>:<abs-path>@<short-sha>
+<repo-slug>:workspaces/<ticket-id>@<short-sha>
 ```
 
 ### Plan
