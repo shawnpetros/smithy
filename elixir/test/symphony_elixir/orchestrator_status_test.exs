@@ -518,8 +518,8 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
     end)
 
-    send(pid, {:claude_turn_end, issue_id, %{input_tokens: 100, output_tokens: 40}})
-    send(pid, {:claude_turn_end, issue_id, %{input_tokens: 50, output_tokens: 20}})
+    send(pid, {:claude_turn_end, issue_id, %{input_tokens: 100, output_tokens: 40, cost_usd: 0.005}})
+    send(pid, {:claude_turn_end, issue_id, %{input_tokens: 50, output_tokens: 20, cost_usd: 0.003}})
 
     snapshot = GenServer.call(pid, :snapshot)
     assert %{running: [snapshot_entry]} = snapshot
@@ -531,6 +531,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert state.runtime_totals.input_tokens == 150
     assert state.runtime_totals.output_tokens == 60
     assert state.runtime_totals.total_tokens == 210
+    assert_in_delta state.runtime_totals.cost_usd, 0.008, 0.0001
   end
 
   test "orchestrator folds claude :rate_limit events into state.rate_limits" do
@@ -583,17 +584,85 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
       |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
     end)
 
-    rate_limits = %{
-      "limit_id" => "claude",
-      "primary" => %{"remaining" => 50, "limit" => 100},
-      "secondary" => nil,
-      "credits" => %{"has_credits" => false, "unlimited" => false, "balance" => nil}
+    # Use the actual Claude rate_limit_event shape (not Codex primary/secondary/credits shape)
+    rate_limit_info = %{
+      "status" => "allowed",
+      "resetsAt" => 1_778_561_400,
+      "rateLimitType" => "five_hour",
+      "overageStatus" => "rejected",
+      "overageDisabledReason" => "out_of_credits",
+      "isUsingOverage" => false
     }
 
-    send(pid, {:claude_rate_limit, issue_id, rate_limits})
+    send(pid, {:claude_rate_limit, issue_id, rate_limit_info})
 
     snapshot = GenServer.call(pid, :snapshot)
-    assert snapshot.rate_limits == rate_limits
+    assert %{} = snapshot.rate_limits
+    assert snapshot.rate_limits["limit_id"] == "five_hour"
+    assert snapshot.rate_limits["status"] == "allowed"
+    assert snapshot.rate_limits["resets_at"] == 1_778_561_400
+    assert snapshot.rate_limits["overage_status"] == "rejected"
+  end
+
+  test "orchestrator updates last_codex_timestamp on claude :heartbeat events" do
+    issue_id = "issue-claude-heartbeat"
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "PER-221-claude-hb",
+      title: "Claude heartbeat test",
+      description: "Verify heartbeat refreshes stall timestamp",
+      state: "In Progress",
+      url: "https://example.org/issues/PER-221-claude-hb"
+    }
+
+    orchestrator_name = Module.concat(__MODULE__, :ClaudeHeartbeatOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    initial_state = :sys.get_state(pid)
+    process_ref = make_ref()
+    started_at = DateTime.utc_now()
+
+    running_entry = %{
+      pid: self(),
+      ref: process_ref,
+      identifier: issue.identifier,
+      issue: issue,
+      session_id: nil,
+      turn_count: 0,
+      last_codex_message: nil,
+      last_codex_timestamp: nil,
+      last_codex_event: nil,
+      input_tokens: 0,
+      output_tokens: 0,
+      total_tokens: 0,
+      last_reported_input_tokens: 0,
+      last_reported_output_tokens: 0,
+      last_reported_total_tokens: 0,
+      started_at: started_at
+    }
+
+    :sys.replace_state(pid, fn _ ->
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
+    end)
+
+    heartbeat_ts = DateTime.utc_now()
+    send(pid, {:claude_heartbeat, issue_id, heartbeat_ts})
+
+    # GenServer.call for ordering guarantee
+    state = :sys.get_state(pid)
+    _ = GenServer.call(pid, :snapshot)
+    state_after = :sys.get_state(pid)
+    entry = Map.get(state_after.running, issue_id) || Map.get(state.running, issue_id)
+    assert entry.last_codex_timestamp == heartbeat_ts
   end
 
   test "orchestrator token accounting prefers total_token_usage over last_token_usage in token_count payloads" do

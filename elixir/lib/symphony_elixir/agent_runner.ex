@@ -425,11 +425,22 @@ defmodule SymphonyElixir.AgentRunner do
         {:rate_limit, rate_limit_info} when is_map(rate_limit_info) ->
           send_claude_rate_limit(recipient, issue, rate_limit_info)
 
+        %{event: :bytes_received, timestamp: timestamp} ->
+          send_claude_heartbeat(recipient, issue, timestamp)
+
         _ ->
           :ok
       end
     end
   end
+
+  defp send_claude_heartbeat(recipient, %Issue{id: issue_id}, timestamp)
+       when is_binary(issue_id) and is_pid(recipient) do
+    send(recipient, {:claude_heartbeat, issue_id, timestamp})
+    :ok
+  end
+
+  defp send_claude_heartbeat(_recipient, _issue, _timestamp), do: :ok
 
   defp send_claude_rate_limit(recipient, %Issue{id: issue_id}, rate_limit_info)
        when is_binary(issue_id) and is_pid(recipient) do

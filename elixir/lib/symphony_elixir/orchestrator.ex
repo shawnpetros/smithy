@@ -19,7 +19,8 @@ defmodule SymphonyElixir.Orchestrator do
     input_tokens: 0,
     output_tokens: 0,
     total_tokens: 0,
-    seconds_running: 0
+    seconds_running: 0,
+    cost_usd: 0.0
   }
 
   defmodule State do
@@ -204,6 +205,17 @@ defmodule SymphonyElixir.Orchestrator do
 
   def handle_info({:codex_worker_update, _issue_id, _update}, state), do: {:noreply, state}
 
+  def handle_info({:claude_heartbeat, issue_id, timestamp}, %{running: running} = state) do
+    case Map.get(running, issue_id) do
+      nil ->
+        {:noreply, state}
+
+      running_entry ->
+        updated_entry = Map.put(running_entry, :last_codex_timestamp, timestamp)
+        {:noreply, %{state | running: Map.put(running, issue_id, updated_entry)}}
+    end
+  end
+
   def handle_info(
         {:claude_turn_end, issue_id, turn_data},
         %{running: running} = state
@@ -216,6 +228,7 @@ defmodule SymphonyElixir.Orchestrator do
         input = Map.get(turn_data, :input_tokens, 0) || 0
         output = Map.get(turn_data, :output_tokens, 0) || 0
         total = input + output
+        cost_usd = Map.get(turn_data, :cost_usd, 0.0) || 0.0
 
         token_delta = %{
           input_tokens: input,
@@ -223,11 +236,13 @@ defmodule SymphonyElixir.Orchestrator do
           total_tokens: total,
           input_reported: input,
           output_reported: output,
-          total_reported: total
+          total_reported: total,
+          cost_usd: cost_usd
         }
 
         updated_entry =
           Map.merge(running_entry, %{
+            last_codex_timestamp: DateTime.utc_now(),
             input_tokens: Map.get(running_entry, :input_tokens, 0) + input,
             output_tokens: Map.get(running_entry, :output_tokens, 0) + output,
             total_tokens: Map.get(running_entry, :total_tokens, 0) + total,
@@ -254,7 +269,9 @@ defmodule SymphonyElixir.Orchestrator do
         {:noreply, state}
 
       _running_entry ->
-        state = apply_runtime_rate_limits(state, %{rate_limits: rate_limit_info})
+        normalized = normalize_claude_rate_limit_info(rate_limit_info)
+        SymphonyElixir.Alerts.rate_limits_updated(normalized)
+        state = %{state | rate_limits: normalized}
         notify_dashboard()
         {:noreply, state}
     end
@@ -1588,13 +1605,35 @@ defmodule SymphonyElixir.Orchestrator do
     seconds_running =
       Map.get(totals, :seconds_running, 0) + Map.get(token_delta, :seconds_running, 0)
 
+    cost_usd =
+      Map.get(totals, :cost_usd, 0.0) + Map.get(token_delta, :cost_usd, 0.0)
+
     %{
       input_tokens: max(0, input_tokens),
       output_tokens: max(0, output_tokens),
       total_tokens: max(0, total_tokens),
-      seconds_running: max(0, seconds_running)
+      seconds_running: max(0, seconds_running),
+      cost_usd: max(0.0, cost_usd)
     }
   end
+
+  defp normalize_claude_rate_limit_info(info) when is_map(info) do
+    limit_id =
+      Map.get(info, "rateLimitType") || Map.get(info, :rateLimitType) ||
+        Map.get(info, "type") || Map.get(info, :type) || "claude"
+
+    %{
+      "limit_id" => to_string(limit_id),
+      "status" => Map.get(info, "status") || Map.get(info, :status),
+      "resets_at" => Map.get(info, "resetsAt") || Map.get(info, :resetsAt),
+      "overage_status" => Map.get(info, "overageStatus") || Map.get(info, :overageStatus),
+      "primary" => nil,
+      "secondary" => nil,
+      "credits" => nil
+    }
+  end
+
+  defp normalize_claude_rate_limit_info(info), do: info
 
   defp extract_token_delta(running_entry, %{event: _, timestamp: _} = update) do
     running_entry = running_entry || %{}
