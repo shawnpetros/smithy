@@ -421,10 +421,9 @@ This repo is operated by Smithy v2.1. Read this file before any work.
 
 ## Workpad
 
-Every Linear ticket has a `## Codex Workpad` comment (Symphony's convention,
-inherited from upstream). All progress notes, plans, validation, review
-findings, and confusions go in that single comment. Do not post separate
-update comments.
+Every Linear ticket has a `## Smithy Workpad` comment (Smithy's convention).
+All progress notes, plans, validation, review findings, and confusions go in
+that single comment. Do not post separate update comments.
 
 Workpad sections:
 - `### Plan` (builder owns)

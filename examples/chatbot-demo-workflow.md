@@ -105,7 +105,7 @@ This flow is the standard Symphony flow with one Anvil-specific change: completi
 
 ## Step 1: Workpad bootstrap
 
-1. Find or create the persistent scratchpad comment with header `## Codex Workpad`. Reuse if present.
+1. Find or create the persistent scratchpad comment with header `## Smithy Workpad`. Reuse if present.
 2. Persist the workpad comment ID. Only write progress to that ID. Do NOT post separate progress comments.
 3. Top of workpad: an environment stamp as a code fence with format `<repo-slug>:workspaces/<ticket-id>@<short-sha>`.
 4. Reconcile the workpad before new edits: check off done items, fix the plan, ensure `Acceptance Criteria` and `Validation` are current.
@@ -148,7 +148,7 @@ Once the issue lands in `Adversarial Review`:
 
 1. Anvil polls Linear for issues in this state.
 2. Anvil runs a cross-model reviewer (Claude Opus 4.6) against the diff.
-3. Anvil writes the verdict back to the same ticket. Future versions append to the `## Codex Workpad` comment under an `### Adversarial Review` section. The current Anvil release posts a separate comment on the issue.
+3. Anvil writes the verdict back to the same ticket. Future versions append to the `## Smithy Workpad` comment under an `### Adversarial Review` section. The current Anvil release posts a separate comment on the issue.
 4. PASS: Anvil transitions to `In Review` and the work waits on a human.
 5. FAIL: Anvil transitions back to `In Progress` and posts findings. The next Symphony tick reads the workpad, addresses the findings, pushes new commits, and re-transitions to `Adversarial Review`.
 
@@ -167,7 +167,7 @@ Symphony does not do anything during `Adversarial Review`. Do not poll, do not e
 ## Workpad template
 
 ````md
-## Codex Workpad
+## Smithy Workpad
 
 ```text
 <repo-slug>:workspaces/<ticket-id>@<short-sha>
