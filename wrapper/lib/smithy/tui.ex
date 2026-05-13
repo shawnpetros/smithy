@@ -6,7 +6,7 @@ defmodule Smithy.TUI do
   dashboard style without adding an external TUI dependency.
   """
 
-  alias Smithy.{Config, Status}
+  alias Smithy.{Color, Config, Status}
 
   @default_columns 115
   @min_columns 80
@@ -185,12 +185,16 @@ defmodule Smithy.TUI do
   end
 
   defp repo_lines(%{status: :offline, slug: slug}, columns, color?) do
+    slug_label =
+      if color? do
+        Color.slug_ansi_256(slug) <> @ansi_bold <> "[#{slug}] OFFLINE" <> @ansi_reset <>
+          @ansi_red <> " — daemon down" <> @ansi_reset
+      else
+        "[#{slug}] OFFLINE — daemon down"
+      end
+
     [
-      section_line(
-        colorize("[#{slug}] OFFLINE — daemon down", @ansi_red, color?),
-        columns,
-        false
-      ),
+      section_line(slug_label, columns, false),
       content_line("  No table; daemon is unreachable", columns),
       blank_line(columns)
     ]
@@ -205,6 +209,13 @@ defmodule Smithy.TUI do
     capacity_suffix = if capacity, do: "/#{capacity}", else: ""
     event_width = running_event_width(columns)
 
+    slug_label =
+      if color? do
+        Color.slug_ansi_256(slug) <> @ansi_bold <> "[#{slug}] Running" <> @ansi_reset
+      else
+        "[#{slug}] Running"
+      end
+
     rows =
       case running do
         [] ->
@@ -217,7 +228,7 @@ defmodule Smithy.TUI do
       end
 
     [
-      section_line("[#{slug}] Running", columns, color?),
+      section_line(slug_label, columns, false),
       content_line("  Agents: #{running_count}#{capacity_suffix}", columns),
       blank_line(columns),
       content_line("  " <> running_table_header(event_width), columns),
