@@ -28,10 +28,16 @@
   <key>Label</key>
   <string>com.shawnpetros.smithy.deploy</string>
 
+  <!-- launchd agents do not inherit the user's login-shell PATH; set it explicitly. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/env</string>
-    <string>bash</string>
+    <string>/bin/bash</string>
     <string>/Users/shawnpetros/projects/smithy/scripts/deploy.sh</string>
   </array>
 
