@@ -188,7 +188,12 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp handle_reviewer_outcome(issue, {:fail, review}, opts) do
     workpad_append(issue, :adversarial_review, format_review_for_workpad(review, "FAIL"), opts)
-    if hard_reset?(review), do: add_label(issue, "smithy:hard-reset", opts)
+    if hard_reset?(review) do
+      add_label(issue, "smithy:hard-reset", opts)
+    else
+      remove_label(issue, "smithy:hard-reset", opts)
+    end
+
     update_issue_state(issue, "Rework", opts)
   end
 

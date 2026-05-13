@@ -56,9 +56,9 @@ defmodule SymphonyElixir.Handoff.Review do
   Read `REVIEW.md` from disk and parse it.
 
   Returns `{:ok, %Review{}}` on success or `{:error, reason}` where `reason`
-  is a descriptive binary. Never raises.
+  is a descriptive binary or `{:invalid_grade, String.t()}`. Never raises.
   """
-  @spec parse_file(Path.t()) :: {:ok, t()} | {:error, binary()}
+  @spec parse_file(Path.t()) :: {:ok, t()} | {:error, binary() | {:invalid_grade, String.t()}}
   def parse_file(path) do
     case File.read(path) do
       {:ok, content} -> parse(content)
@@ -69,7 +69,7 @@ defmodule SymphonyElixir.Handoff.Review do
   @doc """
   Parse a REVIEW.md string into a `%Review{}`.
   """
-  @spec parse(String.t()) :: {:ok, t()} | {:error, binary()}
+  @spec parse(String.t()) :: {:ok, t()} | {:error, binary() | {:invalid_grade, String.t()}}
   def parse(content) when is_binary(content) do
     with {:ok, yaml} <- split_frontmatter(content),
          {:ok, raw} <- decode_yaml(yaml),
