@@ -206,7 +206,7 @@ defmodule Smithy.Dashboard do
             Offline
           </span>
         </header>
-        <p class="offline-message">Daemon unreachable. Start it with <code>smithy start #{safe_slug}</code></p>
+        <p class="offline-message">Daemon unreachable. Start it with <code>smithy daemon start #{safe_slug}</code></p>
       </div>
     </section>
     """
