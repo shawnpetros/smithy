@@ -358,6 +358,7 @@ _Required for any diff touching TUI or CLI display files. Omit section only if t
 
 - [ ] Tape committed: `verification/<ticket-id>.tape`
 - [ ] GIF rendered: `make tui-verify TAPE=verification/<ticket-id>.tape`
+- [ ] Tape linked in PR body
 - [ ] GIF linked in PR body
 
 ### Notes

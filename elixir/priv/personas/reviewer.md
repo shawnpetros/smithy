@@ -60,17 +60,24 @@ Before grading any finding, check whether the diff touches TUI or CLI display fi
 - `elixir/lib/symphony_elixir/status_dashboard.ex`
 - `elixir/lib/symphony_elixir_web/live/dashboard_live.ex`
 
-If any of those paths appear in the diff, the PR **must** include both:
+If any of those paths appear in the diff, the PR **must** satisfy all three:
 
-1. A `.tape` file committed under `verification/<ticket-id>.tape`
-2. A rendered GIF linked in the PR body (produced by `make tui-verify TAPE=<path>`)
+1. A `.tape` file committed under `verification/<ticket-id>.tape` (named after the ticket, not a generic smoke tape)
+2. A `.tape` file path linked in the PR body
+3. A rendered GIF linked in the PR body (produced by `make tui-verify TAPE=<path>`)
 
-Absence of either is a `blocker` finding. Write it as:
+Absence of any individual item is a separate `blocker` finding. Write each missing item as its own entry:
 
 ```yaml
-- finding: "TUI files changed but no VHS tape committed under verification/ and/or no GIF linked in PR body"
+- finding: "TUI files changed but no ticket-specific tape committed at verification/<ticket-id>.tape"
+  grade: blocker
+- finding: "TUI files changed but PR body does not link the .tape file"
+  grade: blocker
+- finding: "TUI files changed but PR body does not link a rendered .gif or .mp4"
   grade: blocker
 ```
+
+Include only the findings that apply. A generic `verification/smoke.tape` does not satisfy condition 1 - the tape must be named after the ticket ID (e.g. `verification/per-218.tape`).
 
 Do not promote this to `polish` or `future` — the prior incident that motivated this check was a TUI that compiled and passed snapshot tests but was interactively broken (q did not quit, scroll did not work, no color). Static analysis cannot catch this class of bug; rendered video evidence is the only acceptable signal.
 

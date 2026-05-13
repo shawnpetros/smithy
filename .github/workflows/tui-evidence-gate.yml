@@ -36,23 +36,36 @@ jobs:
           done
           echo "tui_touched=$TUI_TOUCHED" >> "$GITHUB_OUTPUT"
 
-      - name: Verify tape file exists
+      - name: Verify ticket-specific tape file exists
         if: steps.tui.outputs.tui_touched == 'true'
         run: |
-          if ! compgen -G "verification/*.tape" > /dev/null 2>&1; then
-            echo "::error::TUI files changed but no .tape file found under verification/. Commit a VHS tape before merging."
+          BRANCH="${{ github.head_ref }}"
+          TICKET_ID=$(echo "$BRANCH" | grep -oiE '[a-z]+-[0-9]+' | head -1 | tr '[:upper:]' '[:lower:]')
+          if [ -z "$TICKET_ID" ]; then
+            echo "::error::Could not extract a ticket ID from branch name '$BRANCH'. Branch must contain an ID like per-218."
             exit 1
           fi
-          echo "Tape evidence found:"
-          ls verification/*.tape
+          TAPE_PATH="verification/${TICKET_ID}.tape"
+          if [ ! -f "$TAPE_PATH" ]; then
+            echo "::error::TUI files changed but no ticket-specific tape found at $TAPE_PATH. Commit a VHS tape for this ticket before merging."
+            exit 1
+          fi
+          echo "Tape evidence found: $TAPE_PATH"
 
-      - name: Verify GIF linked in PR body
+      - name: Verify tape and GIF linked in PR body
         if: steps.tui.outputs.tui_touched == 'true'
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
+          MISSING=()
+          if ! echo "$PR_BODY" | grep -qiE '\.tape'; then
+            MISSING+=(".tape file link")
+          fi
           if ! echo "$PR_BODY" | grep -qiE '\.(gif|mp4)'; then
-            echo "::error::TUI files changed but PR body does not link a .gif or .mp4. Attach the rendered verification GIF to the PR description."
+            MISSING+=(".gif or .mp4 link")
+          fi
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            printf '::error::TUI files changed but PR body is missing: %s. Link both the verification tape and rendered GIF in the PR description.\n' "${MISSING[*]}"
             exit 1
           fi
-          echo "GIF evidence found in PR body."
+          echo "Tape and GIF evidence found in PR body."
