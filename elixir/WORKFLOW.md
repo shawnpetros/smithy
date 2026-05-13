@@ -134,7 +134,7 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
 2. Read the current state.
 3. Route to the matching flow:
    - `Backlog` -> do not modify issue content/state; stop and wait for human to move it to `Todo`.
-   - `Todo` -> immediately move to `In Progress`, then ensure bootstrap workpad comment exists (create if missing), then start execution flow.
+   - `Todo` -> immediately move to `In Progress`, then start execution flow (Step 1 handles workpad find/create).
      - If PR is already attached, start by reviewing all open PR comments and deciding required changes vs explicit pushback responses.
    - `In Progress` -> continue execution flow from current scratchpad comment.
    - `Human Review` -> wait and poll for decision/review updates.
@@ -146,8 +146,7 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
    - Create a fresh branch from `origin/main` and restart execution flow as a new attempt.
 5. For `Todo` tickets, do startup sequencing in this exact order:
    - `update_issue(..., state: "In Progress")`
-   - find/create `## Codex Workpad` bootstrap comment
-   - only then begin analysis/planning/implementation work.
+   - only then begin execution with Step 1 (Step 1 owns the workpad find/create).
 6. Add a short comment if state and issue content are inconsistent, then proceed with the safest flow.
 
 ## Step 1: Start/continue execution (Todo or In Progress)
