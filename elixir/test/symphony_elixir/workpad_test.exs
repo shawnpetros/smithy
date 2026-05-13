@@ -159,6 +159,23 @@ defmodule SymphonyElixir.WorkpadTest do
       assert body =~ "## Smithy Workpad"
     end
 
+    test "recognizes legacy ## Codex Workpad marker for backwards compatibility", %{client: pid} do
+      Agent.update(pid, fn state ->
+        %{
+          state
+          | comments_by_issue: %{
+              "issue-1" => [
+                %{id: "c-1", body: "Random earlier comment."},
+                %{id: "c-2", body: "## Codex Workpad\n\n### Plan\n\n- [ ] do thing\n"}
+              ]
+            }
+        }
+      end)
+
+      assert {:ok, "c-2", body} = Workpad.find("issue-1", client: StubClient)
+      assert body =~ "## Codex Workpad"
+    end
+
     test "ignores comments that only mention the marker mid-body", %{client: pid} do
       Agent.update(pid, fn state ->
         %{

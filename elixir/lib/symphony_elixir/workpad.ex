@@ -45,6 +45,7 @@ defmodule SymphonyElixir.Workpad do
   """
 
   @marker_header "## Smithy Workpad"
+  @legacy_marker_header "## Codex Workpad"
 
   @section_headers %{
     plan: "Plan",
@@ -79,8 +80,12 @@ defmodule SymphonyElixir.Workpad do
 
   Returns `{:ok, comment_id, body}` when exactly one workpad exists,
   `:not_found` when none exists, and `{:error, reason}` on any client failure.
-  If the issue somehow has multiple `## Smithy Workpad` comments (shouldn't
-  happen, but defensive), returns the first one and ignores the rest.
+  If the issue somehow has multiple workpad comments (shouldn't happen, but
+  defensive), returns the first one and ignores the rest.
+
+  Recognizes both `## Smithy Workpad` (current) and the legacy
+  `## Codex Workpad` marker so existing live workpads continue to work after
+  the rename.
   """
   @spec find(issue_id(), keyword()) ::
           {:ok, comment_id(), String.t()} | :not_found | {:error, term()}
@@ -268,9 +273,8 @@ defmodule SymphonyElixir.Workpad do
   # --- workpad detection ---------------------------------------------------
 
   defp workpad_comment?(%{body: body}) when is_binary(body) do
-    body
-    |> String.trim_leading()
-    |> String.starts_with?(@marker_header)
+    trimmed = String.trim_leading(body)
+    String.starts_with?(trimmed, @marker_header) or String.starts_with?(trimmed, @legacy_marker_header)
   end
 
   defp workpad_comment?(_), do: false
