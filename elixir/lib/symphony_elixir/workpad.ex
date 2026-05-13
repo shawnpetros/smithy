@@ -3,7 +3,7 @@ defmodule SymphonyElixir.Workpad do
   Workpad comment management for Linear-tracked issues.
 
   Every Linear ticket has at most one persistent comment whose body begins with
-  the marker header `## Codex Workpad`. All progress notes, plans, validation,
+  the marker header `## Smithy Workpad`. All progress notes, plans, validation,
   review findings, and confusions live in that single comment per the universal
   AGENTS.md convention (`v2/SPEC.md` "Workpad" / "Universal AGENTS.md template").
   Modes (builder, reviewer, triager) update the workpad by *appending* dated
@@ -44,7 +44,7 @@ defmodule SymphonyElixir.Workpad do
   Linear client behaviour so existing callers keep working.
   """
 
-  @marker_header "## Codex Workpad"
+  @marker_header "## Smithy Workpad"
 
   @section_headers %{
     plan: "Plan",
@@ -79,7 +79,7 @@ defmodule SymphonyElixir.Workpad do
 
   Returns `{:ok, comment_id, body}` when exactly one workpad exists,
   `:not_found` when none exists, and `{:error, reason}` on any client failure.
-  If the issue somehow has multiple `## Codex Workpad` comments (shouldn't
+  If the issue somehow has multiple `## Smithy Workpad` comments (shouldn't
   happen, but defensive), returns the first one and ignores the rest.
   """
   @spec find(issue_id(), keyword()) ::
@@ -216,7 +216,7 @@ defmodule SymphonyElixir.Workpad do
     confusions = get_var(vars, :confusions, [])
 
     sections = [
-      "## Codex Workpad",
+      "## Smithy Workpad",
       "",
       "```text",
       identity,

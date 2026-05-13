@@ -149,14 +149,14 @@ defmodule SymphonyElixir.WorkpadTest do
           | comments_by_issue: %{
               "issue-1" => [
                 %{id: "c-1", body: "Random earlier comment."},
-                %{id: "c-2", body: "## Codex Workpad\n\n### Plan\n\n- [ ] do thing\n"}
+                %{id: "c-2", body: "## Smithy Workpad\n\n### Plan\n\n- [ ] do thing\n"}
               ]
             }
         }
       end)
 
       assert {:ok, "c-2", body} = Workpad.find("issue-1", client: StubClient)
-      assert body =~ "## Codex Workpad"
+      assert body =~ "## Smithy Workpad"
     end
 
     test "ignores comments that only mention the marker mid-body", %{client: pid} do
@@ -165,7 +165,7 @@ defmodule SymphonyElixir.WorkpadTest do
           state
           | comments_by_issue: %{
               "issue-1" => [
-                %{id: "c-1", body: "I love the ## Codex Workpad pattern btw."}
+                %{id: "c-1", body: "I love the ## Smithy Workpad pattern btw."}
               ]
             }
         }
@@ -187,7 +187,7 @@ defmodule SymphonyElixir.WorkpadTest do
 
       [stored] = StubClient.stored_comments(pid, "issue-1")
       assert stored.id == comment_id
-      assert stored.body =~ "## Codex Workpad"
+      assert stored.body =~ "## Smithy Workpad"
       assert stored.body =~ "### Plan"
       assert stored.body =~ "### Acceptance Criteria"
       assert stored.body =~ "### Validation"
@@ -206,10 +206,10 @@ defmodule SymphonyElixir.WorkpadTest do
 
     test "accepts an explicit :body override", %{client: pid} do
       assert {:ok, _id} =
-               Workpad.create("issue-1", body: "## Codex Workpad\n\ncustom\n", client: StubClient)
+               Workpad.create("issue-1", body: "## Smithy Workpad\n\ncustom\n", client: StubClient)
 
       [stored] = StubClient.stored_comments(pid, "issue-1")
-      assert stored.body == "## Codex Workpad\n\ncustom\n"
+      assert stored.body == "## Smithy Workpad\n\ncustom\n"
     end
   end
 
@@ -217,7 +217,7 @@ defmodule SymphonyElixir.WorkpadTest do
     setup %{client: pid} do
       initial_workpad =
         """
-        ## Codex Workpad
+        ## Smithy Workpad
 
         ```text
         host:/tmp/foo@abcd123
@@ -328,7 +328,7 @@ defmodule SymphonyElixir.WorkpadTest do
     setup %{client: pid} do
       initial_workpad =
         """
-        ## Codex Workpad
+        ## Smithy Workpad
 
         ```text
         host:/tmp/foo@abcd123
@@ -395,7 +395,7 @@ defmodule SymphonyElixir.WorkpadTest do
       # Confusions per @canonical_section_order.
       body_with_confusions =
         """
-        ## Codex Workpad
+        ## Smithy Workpad
 
         ### Plan
 
@@ -455,7 +455,7 @@ defmodule SymphonyElixir.WorkpadTest do
 
       [stored] = StubClient.stored_comments(pid, "issue-3")
       assert stored.id == comment_id
-      assert stored.body =~ "## Codex Workpad"
+      assert stored.body =~ "## Smithy Workpad"
       assert stored.body =~ "### Adversarial Review"
       assert stored.body =~ "#### 2026-05-12 03:00 PASS"
     end
@@ -473,7 +473,7 @@ defmodule SymphonyElixir.WorkpadTest do
     test "produces the canonical workpad template with default placeholders" do
       body = Workpad.render_template(%{})
 
-      assert body =~ "## Codex Workpad"
+      assert body =~ "## Smithy Workpad"
       assert body =~ "```text\n<hostname>:<abs-path>@<short-sha>\n```"
       assert body =~ "### Plan"
       assert body =~ "- [ ] 1. Parent task"

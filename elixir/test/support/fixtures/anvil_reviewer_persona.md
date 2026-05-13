@@ -58,7 +58,7 @@ This is a pre-PR audit, not an open-source code review. The bar is "does this me
 
 Anvil owns every Linear write for this issue: state moves, comments, labels. Do **not** call any Linear write tool. Communicate your verdict via `REVIEW.md`.
 
-If `status: pass`, anvil moves the issue to `Human Review` (Symphony's normal next state) and appends your `notes:` to the existing `## Codex Workpad` comment under a dated `### Adversarial Review` subsection. If `status: fail`, anvil moves the issue to `Rework` (Symphony's rework state) and appends your findings to the same workpad. Symphony's next tick reads that section first when planning the rework loop.
+If `status: pass`, anvil moves the issue to `Human Review` (Symphony's normal next state) and appends your `notes:` to the existing `## Smithy Workpad` comment under a dated `### Adversarial Review` subsection. If `status: fail`, anvil moves the issue to `Rework` (Symphony's rework state) and appends your findings to the same workpad. Symphony's next tick reads that section first when planning the rework loop.
 
 For belt-and-suspenders reasons your spawn config strips every `mcp__linear__save_*` and `mcp__linear__create_*` tool from your toolset; if you try to call one, the harness will deny it.
 

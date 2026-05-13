@@ -8,10 +8,9 @@ tickets), `reviewer` (audits PR diffs), and `triager` (spec-quality gate).
 
 ## Workpad
 
-Every Linear ticket has a `## Codex Workpad` comment (Symphony's convention,
-inherited from upstream). All progress notes, plans, validation, review
-findings, and confusions go in that single comment. Do not post separate
-update comments.
+Every Linear ticket has a `## Smithy Workpad` comment (Smithy's convention).
+All progress notes, plans, validation, review findings, and confusions go in
+that single comment. Do not post separate update comments.
 
 Workpad sections:
 
