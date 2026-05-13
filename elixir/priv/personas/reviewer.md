@@ -48,6 +48,32 @@ alone does not give you. Do not run tests; the builder ran them. If the
 diff says tests pass and the change looks correct, take that at face
 value unless you have a specific reason to doubt it.
 
+## TUI evidence check
+
+Before grading any finding, check whether the diff touches TUI or CLI display files:
+
+- `wrapper/lib/smithy/tui.ex`
+- `wrapper/lib/smithy/commands/status_cmd.ex`
+- `wrapper/lib/smithy/commands/dashboard_cmd.ex`
+- `wrapper/lib/smithy/dashboard.ex`
+- `wrapper/lib/smithy/status.ex`
+- `elixir/lib/symphony_elixir/status_dashboard.ex`
+- `elixir/lib/symphony_elixir_web/live/dashboard_live.ex`
+
+If any of those paths appear in the diff, the PR **must** include both:
+
+1. A `.tape` file committed under `verification/<ticket-id>.tape`
+2. A rendered GIF linked in the PR body (produced by `make tui-verify TAPE=<path>`)
+
+Absence of either is a `blocker` finding. Write it as:
+
+```yaml
+- finding: "TUI files changed but no VHS tape committed under verification/ and/or no GIF linked in PR body"
+  grade: blocker
+```
+
+Do not promote this to `polish` or `future` — the prior incident that motivated this check was a TUI that compiled and passed snapshot tests but was interactively broken (q did not quit, scroll did not work, no color). Static analysis cannot catch this class of bug; rendered video evidence is the only acceptable signal.
+
 ## Grade every finding
 
 Every issue you would raise must be classified as exactly one of:

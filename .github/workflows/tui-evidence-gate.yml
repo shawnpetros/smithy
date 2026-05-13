@@ -1,0 +1,58 @@
+name: tui-evidence-gate
+
+on:
+  pull_request:
+
+jobs:
+  tui-evidence-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect TUI file changes
+        id: tui
+        run: |
+          TUI_PATHS="
+            wrapper/lib/smithy/tui.ex
+            wrapper/lib/smithy/commands/status_cmd.ex
+            wrapper/lib/smithy/commands/dashboard_cmd.ex
+            wrapper/lib/smithy/dashboard.ex
+            wrapper/lib/smithy/status.ex
+            elixir/lib/symphony_elixir/status_dashboard.ex
+            elixir/lib/symphony_elixir_web/live/dashboard_live.ex
+          "
+          CHANGED=$(git diff "origin/${{ github.base_ref }}...HEAD" --name-only)
+          TUI_TOUCHED=false
+          for path in $TUI_PATHS; do
+            [ -z "$path" ] && continue
+            if echo "$CHANGED" | grep -qF "$path"; then
+              echo "TUI file touched: $path"
+              TUI_TOUCHED=true
+            fi
+          done
+          echo "tui_touched=$TUI_TOUCHED" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tape file exists
+        if: steps.tui.outputs.tui_touched == 'true'
+        run: |
+          if ! compgen -G "verification/*.tape" > /dev/null 2>&1; then
+            echo "::error::TUI files changed but no .tape file found under verification/. Commit a VHS tape before merging."
+            exit 1
+          fi
+          echo "Tape evidence found:"
+          ls verification/*.tape
+
+      - name: Verify GIF linked in PR body
+        if: steps.tui.outputs.tui_touched == 'true'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if ! echo "$PR_BODY" | grep -qiE '\.(gif|mp4)'; then
+            echo "::error::TUI files changed but PR body does not link a .gif or .mp4. Attach the rendered verification GIF to the PR description."
+            exit 1
+          fi
+          echo "GIF evidence found in PR body."

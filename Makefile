@@ -6,7 +6,7 @@ PROJECTS := wrapper elixir
 SMITHY_BIN := $(CURDIR)/wrapper/bin/smithy
 SYMPHONY_BIN := $(CURDIR)/elixir/bin/symphony
 
-.PHONY: help install uninstall clean test rebuild check-mise check-runtimes trust deps build install-bin verify-install next-steps
+.PHONY: help install uninstall clean test rebuild check-mise check-runtimes trust deps build install-bin verify-install next-steps tui-verify
 .NOTPARALLEL:
 
 help:
@@ -138,3 +138,19 @@ next-steps:
 		'  $$ smithy daemon start <slug>' \
 		'' \
 		"Acknowledge prompts on first daemon start if you haven't already."
+
+tui-verify: check-mise
+	@if [ -z "$(TAPE)" ]; then \
+		echo "Usage: make tui-verify TAPE=<path-to-.tape>" >&2; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(TAPE)" ]; then \
+		echo "Tape file not found: $(TAPE)" >&2; \
+		exit 1; \
+	fi
+	@if ! "$(MISE)" exec -- vhs --version >/dev/null 2>&1; then \
+		echo "vhs is not available via mise. Run: mise install" >&2; \
+		exit 1; \
+	fi
+	@echo "==> vhs $(TAPE)"
+	@"$(MISE)" exec -- vhs "$(TAPE)"
