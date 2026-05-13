@@ -15,7 +15,7 @@ defmodule SymphonyElixir.Handoff.Review do
       status: pass | fail
       findings:
         - finding: "<text>"
-          grade: blocker | polish | future
+          grade: blocker | polish | future | rebuild-from-scratch
       notes: |
         Optional longer prose context.
       ---
@@ -40,7 +40,7 @@ defmodule SymphonyElixir.Handoff.Review do
   Ported from `anvil/src/review.rs`.
   """
 
-  @type grade :: :blocker | :polish | :future
+  @type grade :: :blocker | :polish | :future | :rebuild_from_scratch
   @type finding :: %{finding: String.t(), grade: grade()}
   @type status :: :pass | :fail
 
@@ -56,9 +56,9 @@ defmodule SymphonyElixir.Handoff.Review do
   Read `REVIEW.md` from disk and parse it.
 
   Returns `{:ok, %Review{}}` on success or `{:error, reason}` where `reason`
-  is a descriptive binary. Never raises.
+  is a descriptive binary or `{:invalid_grade, String.t()}`. Never raises.
   """
-  @spec parse_file(Path.t()) :: {:ok, t()} | {:error, binary()}
+  @spec parse_file(Path.t()) :: {:ok, t()} | {:error, binary() | {:invalid_grade, String.t()}}
   def parse_file(path) do
     case File.read(path) do
       {:ok, content} -> parse(content)
@@ -69,7 +69,7 @@ defmodule SymphonyElixir.Handoff.Review do
   @doc """
   Parse a REVIEW.md string into a `%Review{}`.
   """
-  @spec parse(String.t()) :: {:ok, t()} | {:error, binary()}
+  @spec parse(String.t()) :: {:ok, t()} | {:error, binary() | {:invalid_grade, String.t()}}
   def parse(content) when is_binary(content) do
     with {:ok, yaml} <- split_frontmatter(content),
          {:ok, raw} <- decode_yaml(yaml),
@@ -202,21 +202,22 @@ defmodule SymphonyElixir.Handoff.Review do
           "blocker" -> {:ok, :blocker}
           "polish" -> {:ok, :polish}
           "future" -> {:ok, :future}
-          other -> {:error, "unknown_grade: unknown grade `#{other}`; expected blocker|polish|future"}
+          "rebuild-from-scratch" -> {:ok, :rebuild_from_scratch}
+          other -> {:error, {:invalid_grade, other}}
         end
 
       other ->
-        {:error, "unknown_grade: `grade` must be a string, got #{inspect(other)}"}
+        {:error, {:invalid_grade, inspect(other)}}
     end
   end
 
   # ----- invariants -----
 
   defp validate_fail_requires_blocker(:fail, findings) do
-    if Enum.any?(findings, fn f -> f.grade == :blocker end) do
+    if Enum.any?(findings, fn f -> f.grade in [:blocker, :rebuild_from_scratch] end) do
       :ok
     else
-      {:error, "fail_without_blocker: status=fail requires at least one finding with grade=blocker"}
+      {:error, "fail_without_blocker: status=fail requires at least one finding with grade=blocker or rebuild-from-scratch"}
     end
   end
 

@@ -187,9 +187,10 @@ defmodule SymphonyElixir.AgentRunnerTest do
                  workpad_mod: stub_workpad_mod(workpad_table)
                )
 
-      assert read_stub_calls(tracker_table) == [
-               {:update_issue_state, "issue-rev-fail", "Rework"}
-             ]
+      tracker_calls = read_stub_calls(tracker_table)
+      assert {:update_issue_state, "issue-rev-fail", "Rework"} in tracker_calls
+      assert Enum.any?(tracker_calls, &match?({:remove_label, _, "smithy:hard-reset"}, &1))
+      refute Enum.any?(tracker_calls, &match?({:add_label, _, "smithy:hard-reset"}, &1))
 
       assert [{:append_section, "issue-rev-fail", :adversarial_review, content, _}] =
                read_stub_calls(workpad_table)
@@ -343,6 +344,95 @@ defmodule SymphonyElixir.AgentRunnerTest do
       refute Enum.any?(read_stub_calls(telemetry_table), &match?({:emit, :state_transition, _}, &1))
       assert log =~ "State transition to Human Review failed"
       assert log =~ ":state_not_found"
+    end
+  end
+
+  describe "rework routing: incremental vs hard-reset (PER-213)" do
+    setup :stub_workspace_root
+
+    @fixture_fail_blocker "test/support/fixtures/review_fail_blocker.md"
+    @fixture_fail_rebuild "test/support/fixtures/review_fail_rebuild_from_scratch.md"
+
+    test "fail-with-blocker: transitions to Rework without smithy:hard-reset label" do
+      tracker_table = new_stub_table()
+      workpad_table = new_stub_table()
+
+      issue =
+        review_issue("issue-rework-incr", "MT-RW-INCR", state: "Adversarial Review", labels: [])
+
+      reviewer_stub = fn _issue, _workspace, _agent_config, _opts ->
+        {:ok, review} = SymphonyElixir.Handoff.Review.parse_file(@fixture_fail_blocker)
+        {:ok, {:fail, review}}
+      end
+
+      assert :ok =
+               AgentRunner.run(issue, nil,
+                 mode: :reviewer,
+                 agent_config: reviewer_agent_config(),
+                 reviewer_mod: stub_reviewer(reviewer_stub),
+                 tracker_mod: stub_tracker_mod(tracker_table),
+                 workpad_mod: stub_workpad_mod(workpad_table)
+               )
+
+      tracker_calls = read_stub_calls(tracker_table)
+      assert {:update_issue_state, "issue-rework-incr", "Rework"} in tracker_calls
+      refute Enum.any?(tracker_calls, &match?({:add_label, _, "smithy:hard-reset"}, &1))
+    end
+
+    test "fail-with-rebuild-from-scratch: transitions to Rework WITH smithy:hard-reset label" do
+      tracker_table = new_stub_table()
+      workpad_table = new_stub_table()
+
+      issue =
+        review_issue("issue-rework-hard", "MT-RW-HARD", state: "Adversarial Review", labels: [])
+
+      reviewer_stub = fn _issue, _workspace, _agent_config, _opts ->
+        {:ok, review} = SymphonyElixir.Handoff.Review.parse_file(@fixture_fail_rebuild)
+        {:ok, {:fail, review}}
+      end
+
+      assert :ok =
+               AgentRunner.run(issue, nil,
+                 mode: :reviewer,
+                 agent_config: reviewer_agent_config(),
+                 reviewer_mod: stub_reviewer(reviewer_stub),
+                 tracker_mod: stub_tracker_mod(tracker_table),
+                 workpad_mod: stub_workpad_mod(workpad_table)
+               )
+
+      tracker_calls = read_stub_calls(tracker_table)
+      assert {:update_issue_state, "issue-rework-hard", "Rework"} in tracker_calls
+      assert Enum.any?(tracker_calls, &match?({:add_label, _, "smithy:hard-reset"}, &1))
+    end
+
+    test "fail-with-blocker clears stale smithy:hard-reset label when present" do
+      tracker_table = new_stub_table()
+      workpad_table = new_stub_table()
+
+      issue =
+        review_issue("issue-rework-stale", "MT-RW-STALE",
+          state: "Adversarial Review",
+          labels: [%{name: "smithy:hard-reset"}]
+        )
+
+      reviewer_stub = fn _issue, _workspace, _agent_config, _opts ->
+        {:ok, review} = SymphonyElixir.Handoff.Review.parse_file(@fixture_fail_blocker)
+        {:ok, {:fail, review}}
+      end
+
+      assert :ok =
+               AgentRunner.run(issue, nil,
+                 mode: :reviewer,
+                 agent_config: reviewer_agent_config(),
+                 reviewer_mod: stub_reviewer(reviewer_stub),
+                 tracker_mod: stub_tracker_mod(tracker_table),
+                 workpad_mod: stub_workpad_mod(workpad_table)
+               )
+
+      tracker_calls = read_stub_calls(tracker_table)
+      assert {:update_issue_state, "issue-rework-stale", "Rework"} in tracker_calls
+      assert Enum.any?(tracker_calls, &match?({:remove_label, _, "smithy:hard-reset"}, &1))
+      refute Enum.any?(tracker_calls, &match?({:add_label, _, "smithy:hard-reset"}, &1))
     end
   end
 

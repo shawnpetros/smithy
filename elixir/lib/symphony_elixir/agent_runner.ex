@@ -188,12 +188,24 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp handle_reviewer_outcome(issue, {:fail, review}, opts) do
     workpad_append(issue, :adversarial_review, format_review_for_workpad(review, "FAIL"), opts)
+    if hard_reset?(review) do
+      add_label(issue, "smithy:hard-reset", opts)
+    else
+      remove_label(issue, "smithy:hard-reset", opts)
+    end
+
     update_issue_state(issue, "Rework", opts)
   end
 
   defp handle_reviewer_outcome(issue, {:blocked, reason}, opts) do
     apply_harness_blocked(issue, reason, opts)
   end
+
+  defp hard_reset?(%{findings: findings}) do
+    Enum.any?(List.wrap(findings), fn f -> f.grade == :rebuild_from_scratch end)
+  end
+
+  defp hard_reset?(_), do: false
 
   # --- triager mode --------------------------------------------------------
 
@@ -349,18 +361,12 @@ defmodule SymphonyElixir.AgentRunner do
   defp add_label(issue, label_name, opts) do
     tracker_mod = Keyword.get(opts, :tracker_mod, Tracker)
 
-    try do
-      case tracker_mod.add_label(issue, label_name) do
-        :ok ->
-          :ok
+    case tracker_mod.add_label(issue, label_name) do
+      :ok ->
+        :ok
 
-        {:error, reason} ->
-          Logger.warning("Label add #{label_name} failed for #{issue.identifier}: #{inspect(reason)}")
-          :ok
-      end
-    rescue
-      UndefinedFunctionError ->
-        Logger.warning("Tracker.add_label/2 not implemented; skipping label #{label_name} for #{issue.identifier}")
+      {:error, reason} ->
+        Logger.warning("Label add #{label_name} failed for #{issue.identifier}: #{inspect(reason)}")
         :ok
     end
   end
@@ -368,18 +374,12 @@ defmodule SymphonyElixir.AgentRunner do
   defp remove_label(issue, label_name, opts) do
     tracker_mod = Keyword.get(opts, :tracker_mod, Tracker)
 
-    try do
-      case tracker_mod.remove_label(issue, label_name) do
-        :ok ->
-          :ok
+    case tracker_mod.remove_label(issue, label_name) do
+      :ok ->
+        :ok
 
-        {:error, reason} ->
-          Logger.warning("Label remove #{label_name} failed for #{issue.identifier}: #{inspect(reason)}")
-          :ok
-      end
-    rescue
-      UndefinedFunctionError ->
-        Logger.warning("Tracker.remove_label/2 not implemented; skipping label #{label_name} for #{issue.identifier}")
+      {:error, reason} ->
+        Logger.warning("Label remove #{label_name} failed for #{issue.identifier}: #{inspect(reason)}")
         :ok
     end
   end

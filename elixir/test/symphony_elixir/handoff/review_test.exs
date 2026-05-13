@@ -94,6 +94,70 @@ defmodule SymphonyElixir.Handoff.ReviewTest do
     end
   end
 
+  describe "parse/1 rebuild-from-scratch grade" do
+    test "rebuild-from-scratch parses to :rebuild_from_scratch atom" do
+      content = """
+      ---
+      status: fail
+      findings:
+        - finding: entire approach is broken
+          grade: rebuild-from-scratch
+      ---
+      """
+
+      assert {:ok, review} = Review.parse(content)
+      assert review.status == :fail
+      assert [%{finding: "entire approach is broken", grade: :rebuild_from_scratch}] = review.findings
+    end
+
+    test "fail with rebuild-from-scratch finding satisfies the blocker invariant" do
+      content = """
+      ---
+      status: fail
+      findings:
+        - finding: wrong architecture
+          grade: rebuild-from-scratch
+        - finding: style nit
+          grade: polish
+      ---
+      """
+
+      assert {:ok, review} = Review.parse(content)
+      assert review.status == :fail
+      assert Enum.any?(review.findings, fn f -> f.grade == :rebuild_from_scratch end)
+    end
+
+    test "fail with only polish/future grades is still rejected even after rebuild-from-scratch is added" do
+      content = """
+      ---
+      status: fail
+      findings:
+        - finding: rename helper
+          grade: polish
+      ---
+      """
+
+      assert {:error, reason} = Review.parse(content)
+      assert reason =~ "fail_without_blocker"
+    end
+
+    test "mixed rebuild-from-scratch and blocker is valid" do
+      content = """
+      ---
+      status: fail
+      findings:
+        - finding: broken design
+          grade: rebuild-from-scratch
+        - finding: null pointer crash
+          grade: blocker
+      ---
+      """
+
+      assert {:ok, review} = Review.parse(content)
+      assert length(review.findings) == 2
+    end
+  end
+
   describe "parse/1 malformed" do
     test "missing frontmatter is rejected" do
       assert {:error, reason} = Review.parse("just some markdown\n")
@@ -139,7 +203,7 @@ defmodule SymphonyElixir.Handoff.ReviewTest do
       assert reason =~ "maybe"
     end
 
-    test "unknown grade value is rejected" do
+    test "unknown grade value is rejected with structured error" do
       content = """
       ---
       status: fail
@@ -149,9 +213,7 @@ defmodule SymphonyElixir.Handoff.ReviewTest do
       ---
       """
 
-      assert {:error, reason} = Review.parse(content)
-      assert reason =~ "unknown_grade"
-      assert reason =~ "spicy"
+      assert {:error, {:invalid_grade, "spicy"}} = Review.parse(content)
     end
 
     test "missing grade key in a finding is rejected" do
