@@ -19,7 +19,7 @@ defmodule SymphonyElixirWeb.Presenter do
           },
           running: Enum.map(snapshot.running, &running_entry_payload/1),
           retrying: Enum.map(snapshot.retrying, &retry_entry_payload/1),
-          codex_totals: snapshot.codex_totals,
+          runtime_totals: snapshot.runtime_totals,
           rate_limits: snapshot.rate_limits
         }
 
@@ -109,9 +109,9 @@ defmodule SymphonyElixirWeb.Presenter do
       started_at: iso8601(entry.started_at),
       last_event_at: iso8601(entry.last_codex_timestamp),
       tokens: %{
-        input_tokens: entry.codex_input_tokens,
-        output_tokens: entry.codex_output_tokens,
-        total_tokens: entry.codex_total_tokens
+        input_tokens: entry.input_tokens,
+        output_tokens: entry.output_tokens,
+        total_tokens: entry.total_tokens
       }
     }
   end
@@ -140,9 +140,9 @@ defmodule SymphonyElixirWeb.Presenter do
       last_message: summarize_message(running.last_codex_message),
       last_event_at: iso8601(running.last_codex_timestamp),
       tokens: %{
-        input_tokens: running.codex_input_tokens,
-        output_tokens: running.codex_output_tokens,
-        total_tokens: running.codex_total_tokens
+        input_tokens: running.input_tokens,
+        output_tokens: running.output_tokens,
+        total_tokens: running.total_tokens
       }
     }
   end

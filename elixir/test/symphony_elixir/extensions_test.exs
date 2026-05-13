@@ -398,7 +398,7 @@ defmodule SymphonyElixir.ExtensionsTest do
                  "workspace_path" => nil
                }
              ],
-             "codex_totals" => %{
+             "runtime_totals" => %{
                "input_tokens" => 4,
                "output_tokens" => 8,
                "total_tokens" => 12,
@@ -606,9 +606,9 @@ defmodule SymphonyElixir.ExtensionsTest do
             }
           },
           last_codex_timestamp: DateTime.utc_now(),
-          codex_input_tokens: 10,
-          codex_output_tokens: 12,
-          codex_total_tokens: 22,
+          input_tokens: 10,
+          output_tokens: 12,
+          total_tokens: 22,
           started_at: DateTime.utc_now()
         }
       ])
@@ -639,14 +639,14 @@ defmodule SymphonyElixir.ExtensionsTest do
           last_codex_event: "turn_completed",
           last_codex_message: nil,
           last_codex_timestamp: nil,
-          codex_input_tokens: 0,
-          codex_output_tokens: 0,
-          codex_total_tokens: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          total_tokens: 0,
           started_at: DateTime.utc_now()
         }
       ],
       retrying: [],
-      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      runtime_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
       rate_limits: nil
     }
 
@@ -674,7 +674,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     snapshot = %{
       running: [],
       retrying: [],
-      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      runtime_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
       rate_limits: %{}
     }
 
@@ -699,7 +699,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     snapshot = %{
       running: [],
       retrying: [],
-      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      runtime_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
       rate_limits: %{primary: nil, secondary: nil}
     }
 
@@ -818,9 +818,9 @@ defmodule SymphonyElixir.ExtensionsTest do
           last_codex_message: "rendered",
           last_codex_timestamp: nil,
           last_codex_event: :notification,
-          codex_input_tokens: 4,
-          codex_output_tokens: 8,
-          codex_total_tokens: 12,
+          input_tokens: 4,
+          output_tokens: 8,
+          total_tokens: 12,
           started_at: DateTime.utc_now()
         }
       ],
@@ -833,7 +833,7 @@ defmodule SymphonyElixir.ExtensionsTest do
           error: "boom"
         }
       ],
-      codex_totals: %{input_tokens: 4, output_tokens: 8, total_tokens: 12, seconds_running: 42.5},
+      runtime_totals: %{input_tokens: 4, output_tokens: 8, total_tokens: 12, seconds_running: 42.5},
       rate_limits: %{"primary" => %{"remaining" => 11}}
     }
   end
