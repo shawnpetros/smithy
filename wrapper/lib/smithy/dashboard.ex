@@ -190,14 +190,15 @@ defmodule Smithy.Dashboard do
 
   defp render_repo(%{status: :offline, slug: slug, port: port}) do
     hue = Color.slug_css_hue(slug)
+    safe_slug = escape_html(slug)
 
     """
     <section class="repo-section" style="--repo-h: #{hue}">
       <div class="section-card repo-card repo-offline">
         <header class="section-header">
           <div>
-            <p class="eyebrow repo-eyebrow">#{slug}</p>
-            <h2 class="section-title">#{slug}</h2>
+            <p class="eyebrow repo-eyebrow">#{safe_slug}</p>
+            <h2 class="section-title">#{safe_slug}</h2>
             <p class="section-copy mono">http://localhost:#{port}/</p>
           </div>
           <span class="status-badge status-badge-offline">
@@ -205,7 +206,7 @@ defmodule Smithy.Dashboard do
             Offline
           </span>
         </header>
-        <p class="offline-message">Daemon unreachable. Start it with <code>smithy start #{slug}</code></p>
+        <p class="offline-message">Daemon unreachable. Start it with <code>smithy start #{safe_slug}</code></p>
       </div>
     </section>
     """
@@ -213,6 +214,7 @@ defmodule Smithy.Dashboard do
 
   defp render_repo(%{status: :online, slug: slug, port: port, payload: payload}) do
     hue = Color.slug_css_hue(slug)
+    safe_slug = escape_html(slug)
     running = get_in(payload, ["running"]) || []
     retrying = get_in(payload, ["retrying"]) || []
     counts = get_in(payload, ["counts"]) || %{}
@@ -229,8 +231,8 @@ defmodule Smithy.Dashboard do
       <div class="section-card repo-card">
         <header class="section-header">
           <div>
-            <p class="eyebrow repo-eyebrow">#{slug}</p>
-            <h2 class="section-title">#{slug}</h2>
+            <p class="eyebrow repo-eyebrow">#{safe_slug}</p>
+            <h2 class="section-title">#{safe_slug}</h2>
             <p class="section-copy mono">http://localhost:#{port}/</p>
           </div>
           <span class="status-badge status-badge-live">

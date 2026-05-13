@@ -158,6 +158,18 @@ defmodule Smithy.DashboardTest do
 
       assert html =~ "metric-grid"
     end
+
+    test "slug with HTML characters is escaped in online repo" do
+      html = Dashboard.aggregate_html(aggregate([online_repo("<script>alert(1)</script>", 4001)]))
+      refute html =~ "<script>alert"
+      assert html =~ "&lt;script&gt;"
+    end
+
+    test "slug with HTML characters is escaped in offline repo" do
+      html = Dashboard.aggregate_html(aggregate([offline_repo("<img src=x onerror=alert(1)>", 4099)]))
+      refute html =~ "<img src=x"
+      assert html =~ "&lt;img"
+    end
   end
 
   describe "write_aggregate_html/2 (pre-collected aggregate)" do

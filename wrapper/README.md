@@ -30,7 +30,7 @@ wrapper/
     supervisor.ex      # launchd plist generation + launchctl wrappers
     status.ex          # /api/v1/state aggregation
     tui.ex             # ANSI rendering
-    dashboard.ex       # browser launchers + iframe-grid aggregate page
+    dashboard.ex       # aggregate HTML dashboard generator; opens in browser
     logs.ex            # log tail
     commands/          # one module per subcommand for testability
   priv/templates/
@@ -81,6 +81,24 @@ so the daemon respawns after Symphony's exit-75 self-update.
 
 Logs land at `~/.smithy/logs/<slug>/{stdout,stderr}.log`.
 
+## Aggregate dashboard
+
+`smithy dashboard` fetches live state from every registered daemon, renders a
+complete HTML page to `~/.smithy/dashboard.html`, opens it in your default
+browser, and keeps the file updated every 5 seconds so the page's `meta-refresh`
+tag picks up new data automatically. No iframes - the wrapper aggregates JSON
+from each daemon and renders one unified view.
+
+![Smithy aggregate dashboard](../.github/media/smithy-dashboard.png)
+
+The page shows cross-repo totals (agents running, total tokens, throughput),
+a per-repo section for each registered daemon, and muted red rendering for any
+repo whose daemon is offline. Per-repo accent colors derive from the slug name
+via a stable hash, matching the TUI colors from `smithy status`.
+
+`smithy dashboard <slug>` opens `http://localhost:<port>/` for that specific
+repo's Symphony LiveView instead.
+
 ## Aggregate TUI
 
 `smithy status` queries each registered repo's `GET /api/v1/state` (the existing
@@ -91,8 +109,7 @@ expanded help, and arrow keys or `j`/`k` to scroll overflowing rows. Offline rep
 render as `[slug] OFFLINE — daemon down` rather than crashing the aggregate.
 
 `--snapshot` emits a single ANSI frame suitable for scripts that expect one-shot
-terminal output. `--json` emits structured output suitable for piping. `--web`
-opens an iframe-grid HTML page at `~/.smithy/dashboard.html`.
+terminal output. `--json` emits structured output suitable for piping.
 
 ## Tests
 
