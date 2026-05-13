@@ -361,18 +361,12 @@ defmodule SymphonyElixir.AgentRunner do
   defp add_label(issue, label_name, opts) do
     tracker_mod = Keyword.get(opts, :tracker_mod, Tracker)
 
-    try do
-      case tracker_mod.add_label(issue, label_name) do
-        :ok ->
-          :ok
+    case tracker_mod.add_label(issue, label_name) do
+      :ok ->
+        :ok
 
-        {:error, reason} ->
-          Logger.warning("Label add #{label_name} failed for #{issue.identifier}: #{inspect(reason)}")
-          :ok
-      end
-    rescue
-      UndefinedFunctionError ->
-        Logger.warning("Tracker.add_label/2 not implemented; skipping label #{label_name} for #{issue.identifier}")
+      {:error, reason} ->
+        Logger.warning("Label add #{label_name} failed for #{issue.identifier}: #{inspect(reason)}")
         :ok
     end
   end
@@ -380,18 +374,12 @@ defmodule SymphonyElixir.AgentRunner do
   defp remove_label(issue, label_name, opts) do
     tracker_mod = Keyword.get(opts, :tracker_mod, Tracker)
 
-    try do
-      case tracker_mod.remove_label(issue, label_name) do
-        :ok ->
-          :ok
+    case tracker_mod.remove_label(issue, label_name) do
+      :ok ->
+        :ok
 
-        {:error, reason} ->
-          Logger.warning("Label remove #{label_name} failed for #{issue.identifier}: #{inspect(reason)}")
-          :ok
-      end
-    rescue
-      UndefinedFunctionError ->
-        Logger.warning("Tracker.remove_label/2 not implemented; skipping label #{label_name} for #{issue.identifier}")
+      {:error, reason} ->
+        Logger.warning("Label remove #{label_name} failed for #{issue.identifier}: #{inspect(reason)}")
         :ok
     end
   end
