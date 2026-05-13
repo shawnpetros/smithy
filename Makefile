@@ -6,7 +6,7 @@ PROJECTS := wrapper elixir
 SMITHY_BIN := $(CURDIR)/wrapper/bin/smithy
 SYMPHONY_BIN := $(CURDIR)/elixir/bin/symphony
 
-.PHONY: help install uninstall clean test rebuild check-mise check-runtimes trust deps build install-bin verify-install next-steps
+.PHONY: help install uninstall clean test rebuild deploy check-mise check-runtimes trust deps build install-bin verify-install next-steps
 .NOTPARALLEL:
 
 help:
@@ -15,6 +15,7 @@ help:
 		'  make install [PREFIX=~/.local]' \
 		'  make uninstall [PREFIX=~/.local]' \
 		'  make rebuild' \
+		'  make deploy' \
 		'  make clean' \
 		'  make test'
 
@@ -65,6 +66,9 @@ test: check-mise check-runtimes deps
 
 rebuild: check-mise check-runtimes
 	@$(MAKE) build
+
+deploy:
+	@bash "$(CURDIR)/scripts/deploy.sh"
 
 check-mise:
 	@if ! command -v "$(MISE)" >/dev/null 2>&1; then \
