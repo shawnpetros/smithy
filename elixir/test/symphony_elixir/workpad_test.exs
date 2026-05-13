@@ -491,7 +491,7 @@ defmodule SymphonyElixir.WorkpadTest do
       body = Workpad.render_template(%{})
 
       assert body =~ "## Smithy Workpad"
-      assert body =~ "```text\n<hostname>:<abs-path>@<short-sha>\n```"
+      assert body =~ "```text\n<repo-slug>:workspaces/<ticket-id>@<short-sha>\n```"
       assert body =~ "### Plan"
       assert body =~ "- [ ] 1. Parent task"
       assert body =~ "### Acceptance Criteria"

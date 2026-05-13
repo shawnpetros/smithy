@@ -199,7 +199,7 @@ defmodule SymphonyElixir.Workpad do
 
   Variables (all optional, default to empty placeholder strings):
 
-    * `:identity` - the `<hostname>:<abs-path>@<short-sha>` identity line
+    * `:identity` - the `<repo-slug>:workspaces/<ticket-id>@<short-sha>` identity line
     * `:plan_items` - list of strings; each becomes a `- [ ] <item>` line.
       Defaults to `["1. Parent task"]`.
     * `:acceptance_criteria` - list of strings. Defaults to `["Criterion 1"]`.
@@ -213,7 +213,7 @@ defmodule SymphonyElixir.Workpad do
   """
   @spec render_template(map()) :: String.t()
   def render_template(vars) when is_map(vars) do
-    identity = get_var(vars, :identity, "<hostname>:<abs-path>@<short-sha>")
+    identity = get_var(vars, :identity, "<repo-slug>:workspaces/<ticket-id>@<short-sha>")
     plan_items = get_var(vars, :plan_items, ["1. Parent task"])
     acceptance_criteria = get_var(vars, :acceptance_criteria, ["Criterion 1"])
     validation_items = get_var(vars, :validation_items, ["targeted tests: `<command>`"])
