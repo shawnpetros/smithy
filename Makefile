@@ -152,5 +152,6 @@ tui-verify: check-mise
 		echo "vhs is not available via mise. Run: mise install" >&2; \
 		exit 1; \
 	fi
-	@echo "==> vhs $(TAPE)"
-	@"$(MISE)" exec -- vhs "$(TAPE)"
+	@TAPE_OUT="$$(dirname "$(TAPE)")/$$(basename "$(TAPE)" .tape).gif"; \
+	echo "==> vhs $(TAPE) -o $$TAPE_OUT"; \
+	"$(MISE)" exec -- vhs "$(TAPE)" -o "$$TAPE_OUT"

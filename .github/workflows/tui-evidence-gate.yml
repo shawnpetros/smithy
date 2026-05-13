@@ -2,6 +2,7 @@ name: tui-evidence-gate
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 jobs:
   tui-evidence-gate:
