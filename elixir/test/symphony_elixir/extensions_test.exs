@@ -624,6 +624,100 @@ defmodule SymphonyElixir.ExtensionsTest do
     end)
   end
 
+  test "dashboard liveview event history panel uses ASCII dash for nil fields, not &mdash;" do
+    orchestrator_name = Module.concat(__MODULE__, :NilEventOrchestrator)
+
+    snapshot = %{
+      running: [
+        %{
+          issue_id: "issue-nil",
+          identifier: "MT-NIL",
+          state: "running",
+          session_id: nil,
+          turn_count: 1,
+          codex_app_server_pid: nil,
+          last_codex_event: "turn_completed",
+          last_codex_message: nil,
+          last_codex_timestamp: nil,
+          codex_input_tokens: 0,
+          codex_output_tokens: 0,
+          codex_total_tokens: 0,
+          started_at: DateTime.utc_now()
+        }
+      ],
+      retrying: [],
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      rate_limits: nil
+    }
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        refresh: %{queued: false, coalesced: false, requested_at: DateTime.utc_now(), operations: []}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live(build_conn(), "/")
+
+    html = view |> element("button[phx-value-identifier=\"MT-NIL\"]") |> render_click()
+
+    refute html =~ "&amp;mdash;"
+    refute html =~ "&mdash;"
+    assert html =~ "event-history-time"
+  end
+
+  test "dashboard liveview renders n/a empty-state for empty-map rate_limits" do
+    orchestrator_name = Module.concat(__MODULE__, :EmptyRateLimitOrchestrator)
+
+    snapshot = %{
+      running: [],
+      retrying: [],
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      rate_limits: %{}
+    }
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        refresh: %{queued: false, coalesced: false, requested_at: DateTime.utc_now(), operations: []}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, _view, html} = live(build_conn(), "/")
+
+    assert html =~ "empty-state"
+    refute html =~ "rate-limit-grid"
+  end
+
+  test "dashboard liveview renders n/a empty-state for all-nil rate_limit fields" do
+    orchestrator_name = Module.concat(__MODULE__, :NilFieldsRateLimitOrchestrator)
+
+    snapshot = %{
+      running: [],
+      retrying: [],
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      rate_limits: %{primary: nil, secondary: nil}
+    }
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        refresh: %{queued: false, coalesced: false, requested_at: DateTime.utc_now(), operations: []}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, _view, html} = live(build_conn(), "/")
+
+    assert html =~ "empty-state"
+    refute html =~ "rate-limit-grid"
+  end
+
   test "dashboard liveview renders an unavailable state without crashing" do
     start_test_endpoint(
       orchestrator: Module.concat(__MODULE__, :MissingDashboardOrchestrator),
