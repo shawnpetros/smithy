@@ -188,12 +188,19 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp handle_reviewer_outcome(issue, {:fail, review}, opts) do
     workpad_append(issue, :adversarial_review, format_review_for_workpad(review, "FAIL"), opts)
+    if hard_reset?(review), do: add_label(issue, "smithy:hard-reset", opts)
     update_issue_state(issue, "Rework", opts)
   end
 
   defp handle_reviewer_outcome(issue, {:blocked, reason}, opts) do
     apply_harness_blocked(issue, reason, opts)
   end
+
+  defp hard_reset?(%{findings: findings}) do
+    Enum.any?(List.wrap(findings), fn f -> f.grade == :rebuild_from_scratch end)
+  end
+
+  defp hard_reset?(_), do: false
 
   # --- triager mode --------------------------------------------------------
 
